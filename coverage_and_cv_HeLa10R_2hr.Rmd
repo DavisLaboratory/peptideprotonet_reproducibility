@@ -1,0 +1,588 @@
+---
+title: "coverage_and_cv_HeLa10R_2hr_peptideprotonet"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The aim is to compare coverage and CV with MQ+MBR:
+
+```{r}
+# data <- read.csv("~/ion_mobility/peptideprotonet_embedding_space_90Kto20KsplitTrain_epoch300_featuresScaled_tcells_cancer_query_icml2021.csv")
+
+query_embedding <- read.csv('~/ion_mobility/peptideprotonet_embedding_space_90Kto20KsplitTrain_epoch300_featuresScaled_HeLa10Reps2hr_noEvidenceTrain.csv')
+
+refrence_data <- read.csv('~/ion_mobility/peptideprotonet_embedding_space_90Kto20KsplitTrain_epoch300_featuresScaled_EvidenceTrain.csv')
+
+refrence_data$PrecursorID <- paste(refrence_data$PrecursorID, refrence_data$Leading.razor.protein, sep = "_")
+
+tcells_evidence <- read.delim("/stornext/General/data/academic/lab_davis/prot/benchmarking/PXD014777/HeLa_10_replicates_2hr/evidence.txt")
+
+# keep only MSMS evidence
+tcells_evidence <- tcells_evidence[tcells_evidence$Type %in% "TIMS-MULTI-MSMS",]
+tcells_evidence$PrecursorID <- paste(paste(tcells_evidence$Modified.sequence, tcells_evidence$Charge, sep=""),
+                                     tcells_evidence$Leading.razor.protein, sep ="_")
+tcells_evidence$Species <- "HeLa_query"
+
+query <- query_embedding # grep("dim|Raw.file", colnames(data))
+reference <- refrence_data #  grep("dim", colnames(data))
+query$Raw.file.id <- as.numeric(as.factor(query$Raw.file))
+tcells_evidence$Raw.file.id <- as.numeric(as.factor(tcells_evidence$Raw.file))
+
+
+lc_ms_anchors  <- c("Raw.file.id", "Charge","m.z", "Mass", "Intensity","Retention.time")
+identified_peptides <- FNN::get.knnx(query[, lc_ms_anchors], tcells_evidence[, lc_ms_anchors], k=1)
+identified_peptides <- query[identified_peptides$nn.index,]
+identified_peptides$PrecursorID <- tcells_evidence$PrecursorID
+identified_peptides$Species <- tcells_evidence$Species
+
+
+unidentified_peptides <- dplyr::anti_join(query, identified_peptides,
+                                            by = lc_ms_anchors)
+
+
+
+reference_combined <- rbind(reference[,c(grep("dim", colnames(reference), value = TRUE), "Charge", "PrecursorID", "Species")],
+                            identified_peptides[,c(grep("dim", colnames(reference), value = TRUE), "Charge" ,"PrecursorID", "Species")])
+                            
+unidentified_peptides_latent <- unidentified_peptides[, grep("dim", colnames(unidentified_peptides))]
+
+
+reference_latent <- reference_combined[, grep("dim", colnames(reference_combined))]
+reference_charge <- reference_combined$Charge
+reference_ident_labels <- reference_combined$PrecursorID
+reference_ident_species <- reference_combined$Species
+
+
+all_unidentified_peptides <- unidentified_peptides
+```
+
+
+```{r}
+### this chuck implements the two-pass approach
+
+reference_combined <- rbind(reference[,c(grep("dim", colnames(reference), value = TRUE), "Charge", "PrecursorID", "Species")],
+                            identified_peptides[,c(grep("dim", colnames(reference), value = TRUE), "Charge" ,"PrecursorID", "Species")])
+                            
+# reference_combined <- reference_combined[grep("ox|Deamidation|Acetyl|Oxidation|ac", reference_combined$PrecursorID, invert=TRUE),]
+
+
+
+
+
+
+
+unidentified_peptides_latent <- unidentified_peptides[, grep("dim", colnames(unidentified_peptides))]
+#k = 10
+
+
+
+
+
+reference_combined_sub <- reference_combined[reference_combined$Species %in% c("HeLa","Yeast"), ] # c("HeLa","Human","Yeast")
+
+# reference_combined_sub <- reference_combined
+reference_latent <- reference_combined_sub[, grep("dim", colnames(reference_combined_sub))]
+#reference_latent <- t(apply(reference_latent, 1, FUN=function(x) x/sqrt(sum(x^2))))
+reference_charge <- reference_combined_sub$Charge
+reference_ident_labels <- reference_combined_sub$PrecursorID
+reference_ident_species <- reference_combined_sub$Species
+
+
+
+
+study_embedding <- reference_combined[reference_combined$Species %in% c("HeLa_query","Yeast"), ] # c("HeLa","Human","Yeast")
+study_latent <- study_embedding[, grep("dim", colnames(study_embedding))]
+#study_latent <- t(apply(study_latent, 1, FUN=function(x) x/sqrt(sum(x^2)) ))
+study_charge <- study_embedding$Charge
+study_ident_labels <- study_embedding$PrecursorID
+study_ident_species <- study_embedding$Species
+
+
+
+
+
+
+tcells_evidence_dedupped <- tcells_evidence[, c("Raw.file","PrecursorID")]
+tcells_evidence_dedupped <- tcells_evidence_dedupped[!duplicated(tcells_evidence_dedupped),]
+# tcells_evidence_dedupped <- tcells_evidence_dedupped[grep("ox|Deamidation|Acetyl|Oxidation|ac", tcells_evidence_dedupped$PrecursorID, invert=TRUE),]
+```
+
+
+```{r}
+computeStats <- function(thr, k){
+  
+  false_transfer_rate <- c()
+  # coverage_per_run <- c()
+  total_idents_per_run_after_transfer <- c()
+  number_new_ident <- c()
+  coverage_per_run_after_transfer <- c()
+  coverage_per_run_before_transfer <- c()
+  ident_list <- list()
+  
+  itr = 1
+  
+  for (run in unique(tcells_evidence_dedupped$Raw.file)){
+    
+    message(run)
+    missing_idents <- setdiff(tcells_evidence_dedupped$PrecursorID,
+                              tcells_evidence_dedupped$PrecursorID[tcells_evidence_dedupped$Raw.file == run])
+  
+    latent_study <- study_latent[study_embedding$PrecursorID %in% missing_idents,]
+    s_charge <- study_charge[study_embedding$PrecursorID %in% missing_idents]
+    s_ident_labels <- study_ident_labels[study_embedding$PrecursorID %in% missing_idents]
+    s_ident_species <- study_ident_species[study_embedding$PrecursorID %in% missing_idents]
+  
+  
+    run_query_peptides <- unidentified_peptides[unidentified_peptides$Raw.file %in% run,]
+  
+    run_query_peptides_latent <- run_query_peptides[, grep("dim", colnames(run_query_peptides))]
+    #run_query_peptides_latent <- t(apply(run_query_peptides_latent, 1, FUN=function(x) x/sqrt(sum(x^2))))
+    query_feature_charges <- run_query_peptides$Charge
+    run_query_peptides_intensity <- run_query_peptides$Intensity
+  
+  
+    knn_prototypes <- FNN::get.knnx(
+
+        latent_study,
+        run_query_peptides_latent,
+      k = k) 
+  
+    probs <- exp(-0.5*((knn_prototypes$nn.dist^2)/matrixStats::rowSds(knn_prototypes$nn.dist^2)))
+    # probs <- 1 - knn_prototypes$nn.dist^2
+    ww <- matrix(s_charge[knn_prototypes$nn.index], nrow = nrow(probs), ncol = ncol(probs))
+    charge <- matrix(query_feature_charges, nrow = nrow(ww), ncol = ncol(ww), byrow = FALSE)
+    w <- ifelse(ww==charge, 1, 0)
+  
+  
+  
+  
+  
+    transferred_idents <- matrix(s_ident_labels[knn_prototypes$nn.index], 
+                               nrow = nrow(probs), ncol = ncol(probs))
+    transferred_species <- matrix(s_ident_species[knn_prototypes$nn.index], 
+                                nrow = nrow(probs), ncol = ncol(probs))
+
+
+    # probs <- w*probs
+    # probs <- probs/rowSums(probs)
+    # probs[!is.finite(probs)] <- 0
+
+    transferred_idents[w==0] <- "other"
+    transferred_species[w==0] <- "other"
+
+
+    unmapped_queries <- (rowSums(probs < thr) == k)
+    
+    false_transfers_co <- which(rowSums(probs >= thr & transferred_species == c("Yeast") ) > 1)
+    length(false_transfers_co)
+  
+  
+    correct_transfers <-  (rowSums(probs >= thr & (transferred_species == "HeLa_query" | transferred_species == "HeLa") )> 2)
+    correct_transfers_run_names <- run_query_peptides$Raw.file[correct_transfers]
+    correct_transfer_idents <- transferred_idents[correct_transfers,]
+    correct_transfer_idents <- apply(correct_transfer_idents,1, FUN=function(x) {
+      z <- table(x)
+      z <- z[!grepl("other", names(z))]
+      names(z)[which.max(z)]}
+      )
+  
+    correct_transfer_idents <- gsub("__","_",correct_transfer_idents)
+    transfer_idents <- do.call(cbind, list(correct_transfers_run_names, correct_transfer_idents,
+                                           run_query_peptides_intensity[correct_transfers]))
+    transfer_idents <- data.frame(transfer_idents)
+    colnames(transfer_idents) <- c("Raw.file","PrecursorID","Intensity")
+    transfer_idents$PrecursorID <- gsub("__","_", transfer_idents$PrecursorID)
+  
+    
+    
+    ### computation of false transfers-------
+    
+    # false_transfer_rate[itr] <- length(false_transfers)
+    
+    query_feature_charges <- run_query_peptides$Charge[unmapped_queries]
+    unmapped_queries_latent <- run_query_peptides_latent[unmapped_queries,]
+    unmapped_queries_inetnsity <- run_query_peptides_intensity[unmapped_queries]
+    
+    if(nrow(unmapped_queries_latent) > 0 ) {
+      
+      
+      ex_prototypes <- FNN::get.knnx(
+
+        reference_latent,
+        unmapped_queries_latent,
+      k = k) 
+  
+    ex_probs <- exp(-0.5*((ex_prototypes$nn.dist^2)/matrixStats::rowSds(ex_prototypes$nn.dist^2)))
+    # ex_probs <- 1 - ex_prototypes$nn.dist^2
+    ww2 <- matrix(reference_charge[ex_prototypes$nn.index], nrow = nrow(ex_probs), ncol = ncol(ex_probs))
+    charge_ex <- matrix(query_feature_charges, nrow = nrow(ww2), ncol = ncol(ww2), byrow = FALSE)
+    w2 <- ifelse(ww2==charge_ex, 1, 0)
+  
+  
+  
+  
+  
+    transferred_idents <- matrix(reference_ident_labels[ex_prototypes$nn.index], 
+                               nrow = nrow(ex_probs), ncol = ncol(ex_probs))
+    transferred_species <- matrix(reference_ident_species[ex_prototypes$nn.index], 
+                                nrow = nrow(ex_probs), ncol = ncol(ex_probs))
+
+
+    #ex_probs <- w2*ex_probs
+    #ex_probs <- ex_probs/rowSums(ex_probs)
+    # ex_probs[!is.finite(ex_probs)] <- 0
+
+    transferred_idents[w2==0] <- "other"
+    transferred_species[w2==0] <- "other"
+    
+    
+    false_transfers <- which(rowSums(ex_probs >= thr & transferred_species == c("Yeast")) > 1)
+    length(false_transfers)
+    
+    
+    
+    new_transfers <- which(rowSums(ex_probs >= thr & (transferred_species == "HeLa") ) > 1)
+    #table(new_transfers)
+    
+    if(length(new_transfers) > 0){
+      
+      new_transfers_run_names <- run_query_peptides$Raw.file[unmapped_queries][new_transfers]
+      new_transfer_idents <- transferred_idents[new_transfers,, drop=FALSE]
+      new_transfer_idents <- apply(new_transfer_idents,1, FUN=function(x) {
+        z <- table(x)
+        z <- z[!grepl("other", names(z))]
+        names(z)[which.max(z)]
+        }
+      )
+  
+      new_transfer_idents <- gsub("__","_", new_transfer_idents)
+      transfer_idents2 <- do.call(cbind, list(new_transfers_run_names, new_transfer_idents,
+                                              unmapped_queries_inetnsity[new_transfers]))
+      transfer_idents2 <- data.frame(transfer_idents2)
+      colnames(transfer_idents2) <- c("Raw.file","PrecursorID","Intensity")
+      transfer_idents2$PrecursorID <- gsub("__","_", transfer_idents2$PrecursorID)
+  
+      total_transferred_idents <- rbind(transfer_idents2, transfer_idents)
+      number_new_ident[itr] <- length(setdiff(transfer_idents2$PrecursorID, tcells_evidence_dedupped$PrecursorID))
+    } else {
+      total_transferred_idents <- transfer_idents
+      number_new_ident[itr] <- 0
+    }
+    
+     
+    false_transfers <- c(false_transfers, false_transfers_co)
+    false_transfer_rate[itr] <- length(false_transfers)/length(union(total_transferred_idents$PrecursorID,
+                                                                      tcells_evidence_dedupped$PrecursorID[tcells_evidence_dedupped$Raw.file %in% run]))
+     
+    } else{
+      
+      
+      
+      total_transferred_idents <- transfer_idents
+      false_transfer_rate[itr] <- length(false_transfers_co)/length(union(total_transferred_idents$PrecursorID,
+                                                                      tcells_evidence_dedupped$PrecursorID[tcells_evidence_dedupped$Raw.file %in% run]))
+      number_new_ident[itr] <- 0
+      
+    }
+    
+     
+    
+    
+    
+    # need to store raw file, precursor and Intensity
+    all_idents <- rbind(cbind(tcells_evidence[tcells_evidence$Raw.file %in% run, 
+                                        c("Raw.file","PrecursorID","Intensity")],
+                              type = "TIMS-MULTI-MSMS"),
+                        cbind(total_transferred_idents, type = "PIP")
+    )
+    
+    all_idents_in_run <- union(total_transferred_idents$PrecursorID,
+                               tcells_evidence_dedupped$PrecursorID[tcells_evidence_dedupped$Raw.file %in% run])
+    
+    coverage_per_run_after_transfer[itr] <- length(intersect(all_idents_in_run, tcells_evidence_dedupped$PrecursorID))/ length(unique(tcells_evidence_dedupped$PrecursorID))
+    
+    
+    coverage_per_run_before_transfer[itr] <- length(intersect(tcells_evidence_dedupped$PrecursorID[tcells_evidence_dedupped$Raw.file %in% run], tcells_evidence_dedupped$PrecursorID))/ length(unique(tcells_evidence_dedupped$PrecursorID))
+    
+    
+
+    total_idents_per_run_after_transfer[itr] <- length(all_idents_in_run)
+    ident_list[[itr]] <- data.frame(all_idents)
+
+   
+    
+    itr = itr + 1
+     
+    
+  
+  }
+  
+  ALL_IDENTS <- do.call(rbind, ident_list)
+  return(list("threshold" = rep(thr, length(unique(tcells_evidence_dedupped$Raw.file))), 
+              "false_transfer_rate" = false_transfer_rate, 
+                         #"median_coverage" = med_cov_per_run, 
+              "coverage_before_transfer" = coverage_per_run_before_transfer,
+              "coverage_after_transfer" = coverage_per_run_after_transfer,
+              "number_new_idents" = number_new_ident,
+              "total_idents_per_run_after_PIP" = total_idents_per_run_after_transfer,
+              "identifications" = ALL_IDENTS))
+}
+```
+
+```{r eval = FALSE}
+computeStats(0.05, k = 10)
+
+computeStats(0.5, k = 10)
+computeStats(0.2)
+
+computeStats(0.8)
+computeStats(0, k = 10)
+```
+
+
+```{r}
+############# Tabularise results for different cut-offs
+
+results_k10 <- list()
+itr = 1
+for (thr in c(0, 0.01, 0.05, 0.2,0.5, 0.8)){
+  res <- computeStats(thr, k = 10)
+  results_k10[[itr]] <- list("threshold" = thr, "false_transfer_rate" = median(res$false_transfer_rate), 
+                         "mean_coverage" = median(res$coverage_before_transfer), 
+                         "mean_coverage_after_transfer" = mean(res$coverage_after_transfer),
+                         "max_coverage_after_transfer" = max(res$coverage_after_transfer),
+                         "N_new_idents" = round(median(res$number_new_idents)),
+                         "median_idents_per_run_after_PIP" = round(median(res$total_idents_per_run_after_PIP)),
+                         "identifications" = res$identifications)
+  
+  itr = itr + 1
+  
+}
+
+coverage_results <- lapply(results_k10, FUN=function(x)  x[!grepl("identifications", names(x))])
+
+(dt_k10 <- data.frame(do.call(rbind, coverage_results)))
+dt_k10 <- data.frame(round(data.matrix(dt_k10),3))
+
+
+
+
+
+results_5k <- list()
+itr = 1
+for (thr in c(0, 0.01, 0.05, 0.2,0.5, 0.8)){
+  res <- computeStats(thr, k = 5)
+  results_5k[[itr]] <- list("threshold" = thr, "false_transfer_rate" = median(res$false_transfer_rate), 
+                         "mean_coverage" = median(res$coverage_before_transfer), 
+                         "mean_coverage_after_transfer" = mean(res$coverage_after_transfer),
+                         "max_coverage_after_transfer" = max(res$coverage_after_transfer),
+                         "N_new_idents" = round(median(res$number_new_idents)),
+                         "median_idents_per_run_after_PIP" = round(median(res$total_idents_per_run_after_PIP)),
+                         "identifications" = res$identifications)
+  
+  itr = itr + 1
+  
+}
+
+coverage_results <- lapply(results_5k, FUN=function(x)  x[!grepl("identifications", names(x))])
+
+(dt_k5 <- data.frame(do.call(rbind, coverage_results)))
+dt_k5 <- data.frame(round(data.matrix(dt_k5),3))
+
+
+
+```
+
+
+
+
+```{r}
+# Coefficient of variation for MQ+/- MBR
+devtools::load_all("/stornext/General/data/academic/lab_davis/prot/benchmarking/msImpute/")
+
+data <- read.delim("/stornext/General/data/academic/lab_davis/prot/benchmarking/PXD014777/HeLa_10_replicates_2hr/evidence.txt", 
+                   stringsAsFactors = FALSE)
+
+
+table(data$Type)
+
+# data <- data[grep("CON_|REV_", data$Leading.razor.protein, invert=TRUE),]
+# data <- data[data$Charge > 1,]
+data$PeptideID <- paste0(data$Modified.sequence, data$Charge)
+data$matrix.row.id <- paste(data$PeptideID, data$Leading.Razor.Protein, sep ="_")
+
+
+genes <- data[,c("PeptideID","matrix.row.id", "Leading.razor.protein")]
+genes <- genes[!duplicated(genes),]
+
+
+y_noMBR <- evidenceToMatrix(data[data$Type %in% "TIMS-MULTI-MSMS",])
+y_MBR <- evidenceToMatrix(data)
+
+mean(complete.cases(y_noMBR))
+mean(complete.cases(y_MBR))
+
+dim(y_noMBR)  
+dim(y_MBR)  
+
+
+mean(colSums(!is.na(y_noMBR))/nrow(y_noMBR))
+mean(colSums(!is.na(y_MBR))/nrow(y_MBR))
+
+median(matrixStats::rowSds(y_noMBR, na.rm = TRUE)/rowMeans(y_noMBR, na.rm = TRUE), na.rm = TRUE)
+median(matrixStats::rowSds(y_MBR, na.rm = TRUE)/rowMeans(y_MBR, na.rm = TRUE), na.rm = TRUE)
+
+
+median(matrixStats::rowSds(y_noMBR[complete.cases(y_noMBR),])/rowMeans(y_noMBR[complete.cases(y_noMBR),]))
+median(matrixStats::rowSds(y_MBR[complete.cases(y_MBR),], na.rm = TRUE)/rowMeans(y_MBR[complete.cases(y_MBR),]))
+
+
+
+y_MBR <- y_MBR[!grepl("_\\(.*\\)", rownames(y_MBR)),]
+
+y_MBR <- limma::normalizeBetweenArrays(log2(y_MBR), method = "quantile")
+
+genes <- genes[match(rownames(y_MBR), genes$PeptideID),]
+
+
+
+
+sumTopN <- function(x, n=10 , na.rm = TRUE){
+  sum(sort(x, decreasing = TRUE)[1:n], na.rm=na.rm)
+}
+
+pIds <- genes$Leading.razor.protein
+
+
+
+yprot_mbr <- aggregate(.~ ProteinID, FUN=sumTopN, data = data.frame(y_MBR, ProteinID = pIds), 
+                       na.action = na.pass
+                       #na.rm=TRUE, trim = 0.2
+                       )
+rownames(yprot_mbr) <- yprot_mbr$ProteinID
+yprot_mbr$ProteinID <- NULL
+yprot_mbr[yprot_mbr==0] <- NA
+
+
+  
+```
+
+
+```{r}
+## Coefficient of variation for PIP at each threshold
+cv_results_k10 <- list()
+for (j in seq_along(results_k10)){
+  z <- results_k10[[j]]$identifications
+  z$Intensity <- as.numeric(z$Intensity)
+  m <- evidenceToMatrix(z, peptide_id = "PrecursorID")
+  print(table(!grepl("^_", rownames(m))))
+  
+  m <- m[grepl("^_", rownames(m)), ]
+  m <- m[!grepl("_\\(.*\\)", rownames(m)),]
+  # print(tail(m))
+  m <- limma::normalizeBetweenArrays(log2(m), method = "quantile")
+  
+  # cv <- median(matrixStats::rowSds(m, na.rm = TRUE)/rowMeans(m, na.rm = TRUE), na.rm = TRUE)
+  cv <- median(matrixStats::rowSds(m[complete.cases(m),], na.rm = TRUE)/rowMeans(m[complete.cases(m),]))
+  
+  # quantified proteins : number of proteins in at least two runs.
+  pIds <- gsub("(.*)_([1-5])_(.*)","\\3", rownames(m))
+  mprot <- aggregate(.~ ProteinID, FUN=sumTopN, data = data.frame(m, ProteinID = pIds), 
+                       na.action = na.pass
+                       #na.rm=TRUE, trim = 0.2
+                       )
+  rownames(mprot) <- mprot$ProteinID
+  mprot$ProteinID <- NULL
+  mprot[mprot==0] <- NA
+  
+  
+  
+  cv_results_k10[[j]] <- list("threshold" = results_k10[[j]]$thr[1],
+                          "CV_peptide" = cv,
+                          "total_idents" = nrow(m),
+                          "complete_cases" = mean(complete.cases(m)),
+                          "n_quant_proteins" = sum(rowSums(!is.na(mprot)) > 2))
+}
+
+
+cv_results_k10[[length(cv_results_k10) +1]] <- list("threshold" = "MQ+MBR", 
+                                  "CV_peptide" = median(matrixStats::rowSds(y_MBR[complete.cases(y_MBR),], na.rm = TRUE)/rowMeans(y_MBR[complete.cases(y_MBR),])),
+                                  "total_idents" = nrow(y_MBR),
+                                  "complete_cases" = mean(complete.cases(y_MBR)),
+                                  "n_quant_proteins" = sum(rowSums(!is.na(yprot_mbr)) > 2))
+
+(cv_results_k10 <- do.call(rbind, cv_results_k10))
+cv_results_k10 <- data.frame(cv_results_k10)
+cv_results_k10 <- data.frame(round(data.matrix(cv_results_k10), 3))
+cv_results_k10[is.na(cv_results_k10)] <- "MQ+MBR"
+
+
+cv_results_k5 <- list()
+for (j in seq_along(results_5k)){
+  z <- results_5k[[j]]$identifications
+  z$Intensity <- as.numeric(z$Intensity)
+  m <- evidenceToMatrix(z, peptide_id = "PrecursorID")
+  print(table(!grepl("^_", rownames(m))))
+  
+  m <- m[grepl("^_", rownames(m)), ]
+  m <- m[!grepl("_\\(.*\\)", rownames(m)),]
+  # print(tail(m))
+  
+  m <- limma::normalizeBetweenArrays(log2(m), method = "quantile")
+  
+  
+  # cv <- median(matrixStats::rowSds(m, na.rm = TRUE)/rowMeans(m, na.rm = TRUE), na.rm = TRUE)
+  cv <- median(matrixStats::rowSds(m[complete.cases(m),], na.rm = TRUE)/rowMeans(m[complete.cases(m),]))
+   # quantified proteins : number of proteins in at least two runs.
+  pIds <- gsub("(.*)_([1-5])_(.*)","\\3", rownames(m))
+  mprot <- aggregate(.~ ProteinID, FUN=sumTopN, data = data.frame(m, ProteinID = pIds), 
+                       na.action = na.pass
+                       #na.rm=TRUE, trim = 0.2
+                       )
+  rownames(mprot) <- mprot$ProteinID
+  mprot$ProteinID <- NULL
+  mprot[mprot==0] <- NA
+  
+  
+  
+  
+  cv_results_k5[[j]] <- list("threshold" = results_5k[[j]]$thr[1],
+                          "CV_peptide" = cv,
+                          "total_idents" = nrow(m),
+                          "complete_cases" = mean(complete.cases(m)),
+                          "n_quant_proteins" = sum(rowSums(!is.na(mprot)) > 2))
+}
+
+
+cv_results_k5[[length(cv_results_k5) +1]] <- list("threshold" = "MQ+MBR", 
+                                  "CV_peptide" = median(matrixStats::rowSds(y_MBR[complete.cases(y_MBR),], na.rm = TRUE)/rowMeans(y_MBR[complete.cases(y_MBR),])),
+                                  "total_idents" = nrow(y_MBR),
+                                  "complete_cases" = mean(complete.cases(y_MBR)),
+                                  "n_quant_proteins" = sum(rowSums(!is.na(yprot_mbr)) > 2))
+
+(cv_results_k5 <- do.call(rbind, cv_results_k5))
+cv_results_k5 <- data.frame(cv_results_k5)
+cv_results_k5 <- data.frame(round(data.matrix(cv_results_k5), 3))
+cv_results_k5[is.na(cv_results_k5)] <- "MQ+MBR"
+
+
+# save(dt_k10, dt_k5, cv_results_k10, cv_results_k5, file = "HeLa_10rep_2hr_peptideprotonet_evals_normalisedIntensity_nquantprotein.RData")
+```
+
+
+
+
+
+```{r}
+library(kableExtra)
+dt %>%
+  kbl(caption = "False transfer rate and peptide coverage per run",
+      col.names = c("Threshold", "False transfer rate", "Mean coverage", "Mean coverage after PIP", 
+                    "Max coverage after PIP", 
+                    "Number new identifications", "Median identifications per run"),
+      booktabs = TRUE) %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+```
