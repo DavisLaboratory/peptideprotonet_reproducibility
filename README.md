@@ -5,3 +5,18 @@ Code and notebooks to reproduce figures and results for the manuscript **PIPP: I
 
 ![pipp_gabstract_github](https://github.com/DavisLaboratory/peptideprotonet_reproducibility/assets/7257233/341527f5-e055-4eba-aeae-e7fc61cacc54)
 
+
+### Requierments
+```
+python
+torch
+
+```
+### Usage
+
+```
+```
+
+
+Pre-trained model, train/test splits and pre-computed embeddings can be downloaded from [Zenodo](https://zenodo.org/record/8051947) 
+
