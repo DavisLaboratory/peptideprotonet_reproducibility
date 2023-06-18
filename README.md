@@ -6,7 +6,9 @@ Code and notebooks to reproduce figures and results for the manuscript **PIPP: I
 ![pipp_gabstract_github](https://github.com/DavisLaboratory/peptideprotonet_reproducibility/assets/7257233/341527f5-e055-4eba-aeae-e7fc61cacc54)
 
 PIPP is a deep learning framework for match-between-run in DDA PASEF data quantified by MaxQuant.
-The pre-trained model, train/test splits and pre-computed embeddings can be downloaded from [Zenodo](https://zenodo.org/record/8051947) 
+We have trained a deep neural network model which learns an embedding of MS1 features of a large number of peptide identifications quantified in two of the most comprehensive DDA-PASEF datasets up to the date, namely PXD019086 and PXD010012 datasets. The model is learnt by a novel modification of Prototypical Networks, which is few-shot learning classification algorithm.  The pre-trained model is used for peptide identity propation to match identifications between runs, increase protein coverage and improve data completeness.
+
+The pre-trained model, train/test splits and pre-computed embeddings can be downloaded from [Zenodo](https://zenodo.org/record/8051947). 
 
 ### Requierments
 ```
