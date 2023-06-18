@@ -49,7 +49,7 @@ python main.py --max-epoch 300
                --train-way n_train
 
 ```
-To train a new model, a few more package dependencies are required. See below or `import` statements in `pipp/main.py`. The code supports training on GPU.
+If you wish to train a new model, a few more package dependencies are required. See below or `import` statements in `pipp/main.py`. The code supports training on GPU.
 
 ###### Additional dependencies required to train a new model
 - \__future\__
