@@ -6,11 +6,11 @@ Code and notebooks to reproduce figures and results for the manuscript **PIPP: I
 ![pipp_gabstract_github](https://github.com/DavisLaboratory/peptideprotonet_reproducibility/assets/7257233/341527f5-e055-4eba-aeae-e7fc61cacc54)
 
 PIPP is a deep learning framework for match-between-run in DDA PASEF data quantified by MaxQuant.
-We have trained a deep neural network model which learns an embedding of MS1 features of peptide identifications quantified in two large-scale DDA-PASEF datasets up to the date, namely PXD019086 and PXD010012 datasets. The model is learnt by a novel modification of Prototypical Networks, which is few-shot learning classification algorithm.  The pre-trained model is used for peptide identity propation to match identifications between runs, increase protein coverage and improve data completeness.
+We have trained a deep neural network model which learns an embedding of MS1 features of peptide identifications quantified in two large-scale DDA-PASEF datasets up to the date, namely PXD019086 and PXD010012 datasets. The model is learnt by a novel modification of Prototypical Networks, which is a few-shot learning classification algorithm. The pre-trained model is used for peptide identity propagation to match identifications between runs, increase protein coverage and improve data completeness.
 
 The pre-trained model, train/test splits and pre-computed embeddings can be downloaded from [Zenodo](https://zenodo.org/record/8051947). 
 
-### Requierments
+### Requirements
 ```
 python
 torch
@@ -22,7 +22,7 @@ torch
 ```
 
 ### Train a new model
-To train a new model, replace `path_data` and `path_valid_data` in `pipp/main.py`. Make sure you specify a model name when writing (saving) the model. Then from command line run:
+To train a new model, replace `path_data` and `path_valid_data` in `pipp/main.py`. Make sure you specify a model name when writing (saving) the model. Then from the command line, run:
 
 ```
 
@@ -51,7 +51,7 @@ python main.py --max-epoch 300
                --train-way n_train
 
 ```
-If you wish to train a new model, a few more package dependencies are required. See below or `import` statements in `pipp/main.py`. The code supports training on GPU.
+If you wish to train a new model, a few more package dependencies are required. See below or `import` statements in `pipp/main.py`. The code supports training on the GPU.
 
 ###### Additional dependencies required to train a new model
 - \__future\__
