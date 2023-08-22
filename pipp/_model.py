@@ -16,34 +16,80 @@ from sklearn.preprocessing import StandardScaler
 logger = logging.getLogger(__name__)
 
 
-class peptideprotonet:
+class Peptideprotonet:
 
-    def __init__(self, reference_model:str):
+    def __init__(self, device:str=None):
         super().__init__()
         
-        # TODO: replaced with scvi-tools's approach for initialization
+        if device is None:
+            device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
         
-        # load the model and state dict 
-        self.model = Encoder() # default params specifief in Encoder are identical as pretrained model - that's why it works
-        self.model.load_state_dict(torch.load(reference_model))
-        self.model.eval()
-        
-        # TODO define device
-        
-        
+        self.device = torch.device(device)
+
+        self.module = Encoder()
+        self.module.to(device)
+        self.module.eval()
 
 
-    def get_latent_representations(self, x):
+    # @NOTE: this loading method will be inherited from scvi-tools later
+    @classmethod
+    def load(clz, dir_path:str, device:str=None) -> 'Peptideprotonet':
+        """
+        Instantiate a Peptideprotonet model from a pretrained model.
 
+        Parameters
+        ----------
+
+        dir_path
+            Path to pretrained model.
+        
+        device
+            Device to load the model on.
+
+        Returns
+        -------
+            Model with pretrained weights.
+
+        Example
+        -------
+        >>> import pipp
+        >>> pipp = pipp.Peptideprotonet.load('path/to/model.pt')
+        """
+
+        if device is None:
+            device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+
+        device = torch.device(device)
+
+        module = torch.load(dir_path, map_location=torch.device('cpu'))
+        module = module.to(device)
+        module.eval()
+
+        pipp = Peptideprotonet(device.type)
+        pipp.module = module
+        return pipp
+
+    def get_latent_representations(self, x:pd.DataFrame) -> np.ndarray:
+        """
+        Get the latent representation of the data.
+
+        Parameters
+        ----------
+        x
+            Dataframe with the columns:  ['Charge','Mass', 'm/z', 'Retention time','Retention length', 'Ion mobility index', 'Ion mobility length','Number of isotopic peaks']
+
+        Returns
+        -------
+            Embeddings of the data.
+        """
+        
         # assume x is data[attr_names]
         # also could enhance by splitting the data in smaller batches
         # but not required here as observation space small/manageable
         
-#         x = torch.from_numpy(data[attr_names].to_numpy()).float()
-        x = torch.from_numpy(x.to_numpy()).float()
-        x = StandardScaler().fit_transform(x)
-        z = model(torch.from_numpy(x).float().to(device))
+        x = StandardScaler().fit_transform(x.to_numpy())
+        x = torch.from_numpy(x).float().to(self.device)
+        z = self.module(x)
         
-        # TODO: check scvi-tools re: how this is handeled
-        z = z_query.cpu().detach().numpy()
-        return z
+        latent = z.cpu().detach().numpy()
+        return latent
