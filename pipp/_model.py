@@ -7,7 +7,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 from ._module import Encoder
 
 from sklearn.preprocessing import StandardScaler
@@ -18,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 class Peptideprotonet:
 
-    def __init__(self, device:str=None):
+    def __init__(self, device:str=None, dir_path:str=None):
         super().__init__()
         
         if device is None:
@@ -27,6 +26,10 @@ class Peptideprotonet:
         self.device = torch.device(device)
 
         self.module = Encoder()
+
+        if dir_path is not None:
+            self.module.load_state_dict(torch.load(dir_path, map_location=torch.device('cpu')))
+
         self.module.to(device)
         self.module.eval()
 
@@ -56,18 +59,7 @@ class Peptideprotonet:
         >>> pipp = pipp.Peptideprotonet.load('path/to/model.pt')
         """
 
-        if device is None:
-            device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-
-        device = torch.device(device)
-
-        module = torch.load(dir_path, map_location=torch.device('cpu'))
-        module = module.to(device)
-        module.eval()
-
-        pipp = Peptideprotonet(device.type)
-        pipp.module = module
-        return pipp
+        return Peptideprotonet(device=device, dir_path=dir_path)
 
     def get_latent_representations(self, x:pd.DataFrame) -> np.ndarray:
         """
@@ -92,4 +84,5 @@ class Peptideprotonet:
         z = self.module(x)
         
         latent = z.cpu().detach().numpy()
+
         return latent
