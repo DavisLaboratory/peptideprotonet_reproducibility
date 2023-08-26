@@ -8,10 +8,12 @@ setup(
 
     install_requires=[
         'torch',
+        'pynndescent',
         'numpy',
         'scikit-learn',
-        'seaborn',
-        'pynndescent',
+        'matplotlib',
+        'pandas',
+        'umap-learn',
     ]
 
 )
