@@ -56,7 +56,7 @@ class Peptideprotonet:
         Example
         -------
         >>> import pipp
-        >>> pipp = pipp.Peptideprotonet.load('path/to/model.pt')
+        >>> model = pipp.Peptideprotonet.load('path/to/model.pt')
         """
 
         return Peptideprotonet(device=device, dir_path=dir_path)
