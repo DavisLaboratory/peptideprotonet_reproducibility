@@ -9,7 +9,9 @@ setup(
     install_requires=[
         'torch',
         'numpy',
-        'scikit-learn'
+        'scikit-learn',
+        'seaborn',
+        'pynndescent',
     ]
 
 )

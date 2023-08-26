@@ -68,7 +68,7 @@ class Peptideprotonet:
         Parameters
         ----------
         x
-            Dataframe with the columns:  ['Charge','Mass', 'm/z', 'Retention time','Retention length', 'Ion mobility index', 'Ion mobility length','Number of isotopic peaks']
+            Dataframe with the columns: ['Charge','Mass', 'm/z', 'Retention time', 'Retention length', 'Ion mobility index', 'Ion mobility length', 'Number of isotopic peaks']
 
         Returns
         -------
