@@ -10,11 +10,17 @@ We have trained a deep neural network model which learns an embedding of MS1 fea
 
 The pre-trained model, train/test splits and pre-computed embeddings can be downloaded from [Zenodo](https://zenodo.org/record/8051947). 
 
-### Requirements
+
+### Installation
+Change working directory to "peptideprotonet_reproducibility", then (with your virtual environment activated) execute:
+
 ```
-python
-torch
+pip install .
 ```
+This will install the PIPP library, including all the dependencies needed to use the library and run the notebooks in ```/examples/```.
+
+
+
 ### Usage
 
 #### Use the pre-trained model
