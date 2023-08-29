@@ -12,6 +12,7 @@ setup(
         'numpy',
         'scikit-learn',
         'matplotlib',
+        'seaborn',
         'pandas',
         'umap-learn',
     ]

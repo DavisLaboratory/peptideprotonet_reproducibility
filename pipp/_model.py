@@ -27,7 +27,7 @@ class Peptideprotonet:
 
         self.module = Encoder()
 
-        if dir_path is not None:
+        if dir_path:
             self.module.load_state_dict(torch.load(dir_path, map_location=torch.device('cpu')))
 
         self.module.to(device)
