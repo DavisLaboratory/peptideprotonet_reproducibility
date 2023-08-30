@@ -28,8 +28,11 @@ This will install the PIPP library, including all the dependencies needed to use
 import pipp
 model = pipp.Peptideprotonet.load('path/to/model.pt')
 
-# x: pandas dataframe with columns ['Charge','Mass', 'm/z', 'Retention time', 'Retention length', 'Ion mobility index', 'Ion mobility length', 'Number of isotopic peaks']
-z = model.get_latent_representations(x)
+# MS: pandas dataframe with columns ['Charge','Mass', 'm/z', 'Retention time', 'Retention length', 'Ion mobility index', 'Ion mobility length', 'Number of isotopic peaks']
+z = model.get_latent_representations(MS)
+
+# MSMS: pandas dataframe with columns ['PrecursorID', 'Charge', 'Mass', 'm/z', 'Retention time', 'Retention length', 'Ion mobility index', 'Ion mobility length', 'Number of isotopic peaks']
+identities, confidence = model.propagate(MS, MSMS)
 ```
 
 ### Train a new model
@@ -69,7 +72,6 @@ If you wish to train a new model, a few more package dependencies are required. 
 - argparse
 - pickle
 - learn2learn
-- sklearn
 
 
 Any problems? Let us know by openning a new issue!
