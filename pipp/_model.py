@@ -1,13 +1,10 @@
 import logging
 
-from collections import defaultdict
-from typing import List, Optional, Sequence
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
 from ._module import Encoder
 
@@ -89,7 +86,7 @@ class Peptideprotonet:
         return latent
     
 
-    def propagate(self, MS:pd.DataFrame, MSMS:pd.DataFrame, k_neighbours=5, verbose=True) -> tuple[np.ndarray, np.ndarray]:
+    def propagate(self, MS:pd.DataFrame, MSMS:pd.DataFrame, k_neighbours=5, verbose=True) -> Tuple[np.ndarray, np.ndarray]:
         """
         Propagate the identities/labels from the support set to the query set.
 
@@ -103,6 +100,9 @@ class Peptideprotonet:
         
         k_neighbours
             Number of neighbours to consider when computing identities and confidence.
+
+        verbose
+            Whether to print progress.
 
         Returns
         -------
@@ -195,7 +195,7 @@ class Peptideprotonet:
         return weights
 
 
-    def _compute_prediction_with_charge_filter(self, query_charges:np.ndarray, neighbours_weights:np.ndarray, neighbours_charges:np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def _compute_prediction_with_charge_filter(self, query_charges:np.ndarray, neighbours_weights:np.ndarray, neighbours_charges:np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
             Helper function to compute predictions with charge filter.
 
