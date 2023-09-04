@@ -5,11 +5,10 @@ from typing import Tuple
 import numpy as np
 import pandas as pd
 import torch
-
-from ._module import Encoder
-
 from sklearn.preprocessing import StandardScaler
 from pynndescent import NNDescent
+
+from ._module import Encoder
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +148,7 @@ class Peptideprotonet:
         query_charges = MS['Charge'].values
 
         if verbose:
-            print("Propagating identities...")
+            print(f"Propagating identities based on {k_neighbours} nearest neighbour prototypes...")
 
         knn_index = NNDescent(prototype_embeddings, metric='euclidean', n_jobs=-1)
         neighbours, distances = knn_index.query(query_embeddings, k=k_neighbours)
