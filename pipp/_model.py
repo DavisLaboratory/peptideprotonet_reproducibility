@@ -1,6 +1,6 @@
 import logging
 
-from typing import Tuple
+from typing import Tuple, Dict
 
 import numpy as np
 import pandas as pd
@@ -18,6 +18,8 @@ class Peptideprotonet:
     def __init__(self, device:str=None, dir_path:str=None):
         super().__init__()
         
+        self._features = ['Charge','Mass', 'm/z', 'Retention time', 'Retention length', 'Ion mobility index', 'Ion mobility length', 'Number of isotopic peaks']
+
         if device is None:
             device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
         
@@ -116,18 +118,71 @@ class Peptideprotonet:
         >>> identities, confidence = model.propagate(MS, MSMS)
         """
 
-        features = ['Charge','Mass', 'm/z', 'Retention time', 'Retention length', 'Ion mobility index', 'Ion mobility length', 'Number of isotopic peaks']
-
-        # compute peptide embeddings
         if verbose:
-            print("Computing peptide embeddings...")
+            print('Computing prototypes...')
 
-        query_embeddings = self.get_latent_representations(MS[features])
-        support_embeddings = self.get_latent_representations(MSMS[features])
+        prototypes = self._compute_prototypes(MSMS)
 
-        # compute the prototype embeddings
         if verbose:
-            print("Computing prototype embeddings...")
+            print(f'Propagating identities using {k_neighbours} nearest neighbours...')
+
+        identities, confidence = self._propagate_using_prototypes(MS, prototypes, k_neighbours=k_neighbours)
+
+        return identities, confidence
+    
+    
+    def _propagate_using_prototypes(self, MS:pd.DataFrame, prototypes:Dict[str, np.ndarray], k_neighbours=5) -> Tuple[np.ndarray, np.ndarray]:
+        """
+            Helper function to propagate identities using prototypes.
+
+            Parameters
+            ----------
+            MS
+                Query set with the columns: ['Charge','Mass', 'm/z', 'Retention time', 'Retention length', 'Ion mobility index', 'Ion mobility length', 'Number of isotopic peaks']
+            
+            prototypes
+                Prototypes with the columns: ['PrecursorID', 'Charge', 'Embedding']
+
+            k_neighbours
+                Number of neighbours to consider when computing identities and confidence.
+
+            Returns
+            -------
+                Predicted identities and confidence.
+        """
+
+        query_embeddings = self.get_latent_representations(MS[self._features])
+        query = { 'Charges': MS['Charge'].values, 'Embedding': query_embeddings }
+        
+        knn_index = NNDescent(prototypes['Embedding'], metric='euclidean', n_jobs=-1)
+        neighbours, distances = knn_index.query(query['Embedding'], k=k_neighbours)
+
+        neighbours_weights = self._compute_weights(distances)
+        neighbours_charges = np.array([prototypes['Charge'][q_neighbours] for q_neighbours in neighbours])
+
+        identities_args, confidence = self._compute_prediction_with_charge_filter(query['Charges'], neighbours_weights, neighbours_charges)
+
+        identities_ids = neighbours[np.arange(identities_args.shape[0]), identities_args]
+        identities = prototypes['PrecursorID'][identities_ids]
+
+        return identities, confidence
+
+
+    def _compute_prototypes(self, MSMS:pd.DataFrame) -> Dict[str, np.ndarray]:
+        """
+            Helper function to compute prototypes.
+        
+            Parameters
+            ----------
+            MSMS
+                Support set with the columns: ['PrecursorID', 'Charge','Mass', 'm/z', 'Retention time', 'Retention length', 'Ion mobility index', 'Ion mobility length', 'Number of isotopic peaks']
+
+            Returns
+            -------
+                Prototypes with the columns: ['PrecursorID', 'Charge', 'Embedding']
+        """
+
+        support_embeddings = self.get_latent_representations(MSMS[self._features])
 
         prototypes = [] # list of (precursor_id, charge, embedding)
         precursor_groups = MSMS.groupby(['PrecursorID'])
@@ -139,33 +194,20 @@ class Peptideprotonet:
             ilocs = MSMS.index.get_indexer(locs)
             prototypes.append((precursor_id, charge, np.mean(support_embeddings[ilocs], axis=0)))
 
-        prototype_precursor_ids, prototype_charges, prototype_embeddings = zip(*prototypes)
+        precursor_ids, charges, embeddings = zip(*prototypes)
 
-        prototype_precursor_ids = np.array(prototype_precursor_ids)
-        prototype_charges = np.array(prototype_charges)
-        prototype_embeddings = np.array(prototype_embeddings)
+        precursor_ids = np.array(precursor_ids)
+        charges = np.array(charges)
+        embeddings = np.array(embeddings)
 
-        query_charges = MS['Charge'].values
+        prototypes = {
+            'PrecursorID': precursor_ids,
+            'Charge': charges,
+            'Embedding': embeddings
+        }
 
-        if verbose:
-            print(f"Propagating identities based on {k_neighbours} nearest neighbour prototypes...")
+        return prototypes
 
-        knn_index = NNDescent(prototype_embeddings, metric='euclidean', n_jobs=-1)
-        neighbours, distances = knn_index.query(query_embeddings, k=k_neighbours)
-
-        if verbose:
-            print("Computing identities and confidence...")
-
-        neighbours_weights = self._compute_weights(distances)
-        neighbours_charges = np.array([prototype_charges[q_neighbours] for q_neighbours in neighbours])
-
-        identities_args, confidence = self._compute_prediction_with_charge_filter(query_charges, neighbours_weights, neighbours_charges)
-
-        identities_ids = neighbours[np.arange(identities_args.shape[0]), identities_args]
-        identities = prototype_precursor_ids[identities_ids]
-
-        return identities, confidence
-    
 
     def _compute_weights(self, distances:np.ndarray) -> np.ndarray:
         """
