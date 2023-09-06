@@ -12,12 +12,12 @@ The pre-trained model, train/test splits and pre-computed embeddings can be down
 
 
 ### Installation
-Change working directory to "peptideprotonet_reproducibility", then (with your virtual environment activated) execute:
+Change working directory to `peptideprotonet_reproducibility/`, then (with your virtual environment activated) execute:
 
 ```
 pip install .
 ```
-This will install the PIPP library, including all the dependencies needed to use the library and run the notebooks in ```/examples/```.
+This will install the PIPP library, including all the dependencies needed to use the library and run the notebooks in `examples/`.
 
 
 
