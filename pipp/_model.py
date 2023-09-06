@@ -138,7 +138,7 @@ class Peptideprotonet:
             Parameters
             ----------
             MS
-                Query set with the columns: ['Charge','Mass', 'm/z', 'Retention time', 'Retention length', 'Ion mobility index', 'Ion mobility length', 'Number of isotopic peaks']
+                Query set with the columns: ['Charge', 'Mass', 'm/z', 'Retention time', 'Retention length', 'Ion mobility index', 'Ion mobility length', 'Number of isotopic peaks']
             
             prototypes
                 Prototypes with the columns: ['PrecursorID', 'Charge', 'Embedding']
@@ -175,7 +175,7 @@ class Peptideprotonet:
             Parameters
             ----------
             MSMS
-                Support set with the columns: ['PrecursorID', 'Charge','Mass', 'm/z', 'Retention time', 'Retention length', 'Ion mobility index', 'Ion mobility length', 'Number of isotopic peaks']
+                Support set with the columns: ['PrecursorID', 'Charge', 'Mass', 'm/z', 'Retention time', 'Retention length', 'Ion mobility index', 'Ion mobility length', 'Number of isotopic peaks']
 
             Returns
             -------
