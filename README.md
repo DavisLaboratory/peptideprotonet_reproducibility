@@ -10,15 +10,29 @@ We have trained a deep neural network model which learns an embedding of MS1 fea
 
 The pre-trained model, train/test splits and pre-computed embeddings can be downloaded from [Zenodo](https://zenodo.org/record/8051947). 
 
-### Requirements
+
+### Installation
+Change working directory to `peptideprotonet_reproducibility/`, then (with your virtual environment activated) execute:
+
 ```
-python
-torch
+pip install .
 ```
+This will install the PIPP library, including all the dependencies needed to use the library and run the notebooks in `examples/`.
+
+
+
 ### Usage
 
-#### Use the pre-trained model
+#### Using the pre-trained model
 ```
+import pipp
+model = pipp.Peptideprotonet.load('path/to/model.pt')
+
+# MS: pandas dataframe with columns ['Charge','Mass', 'm/z', 'Retention time', 'Retention length', 'Ion mobility index', 'Ion mobility length', 'Number of isotopic peaks']
+z = model.get_latent_representations(MS)
+
+# MSMS: pandas dataframe with columns ['PrecursorID', 'Charge', 'Mass', 'm/z', 'Retention time', 'Retention length', 'Ion mobility index', 'Ion mobility length', 'Number of isotopic peaks']
+identities, confidence = model.propagate(MS, MSMS)
 ```
 
 ### Train a new model
@@ -58,7 +72,6 @@ If you wish to train a new model, a few more package dependencies are required. 
 - argparse
 - pickle
 - learn2learn
-- sklearn
 
 
 Any problems? Let us know by openning a new issue!
