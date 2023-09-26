@@ -105,7 +105,12 @@ class Peptideprotonet:
         return latent
 
     def propagate(
-        self, ms: pd.DataFrame, msms: pd.DataFrame, k_neighbours=5, verbose=True
+        self,
+        ms: pd.DataFrame,
+        msms: pd.DataFrame,
+        k_neighbours=5,
+        use_anchors=True,
+        verbose=True,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Propagate the identities/labels from the support set to the query set.
@@ -137,22 +142,26 @@ class Peptideprotonet:
         >>> identities, confidence = model.propagate(ms, msms)
         """
 
-        if verbose:
-            print("Computing prototypes...")
-
-        prototypes = self._compute_prototypes(msms)
-
-        if verbose:
-            print(f"Propagating identities using {k_neighbours} nearest neighbours...")
+        prototypes = self._compute_prototypes(msms, verbose=verbose)
 
         identities, confidence = self._propagate_using_prototypes(
-            ms, prototypes, k_neighbours=k_neighbours
+            ms,
+            prototypes,
+            k_neighbours=k_neighbours,
+            use_anchors=use_anchors,
+            verbose=verbose,
         )
 
         return identities, confidence
 
     def _propagate_using_prototypes(
-        self, ms: pd.DataFrame, prototypes: Dict[str, np.ndarray], k_neighbours=5
+        self,
+        ms: pd.DataFrame,
+        prototypes: Dict[str, np.ndarray],
+        k_neighbours=5,
+        distance_metric="euclidean",
+        use_anchors=True,
+        verbose=True,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Helper function to propagate identities using prototypes.
@@ -168,24 +177,68 @@ class Peptideprotonet:
         k_neighbours
             Number of neighbours to consider when computing identities and confidence.
 
+        distance_metric
+            Distance metric to use when computing neighbours.
+
+        use_anchors
+            Whether to compute a relative representation.
+
+        verbose
+            Whether to print progress.
+
         Returns
         -------
             Predicted identities and confidence.
         """
 
         query_embeddings = self.get_latent_representations(ms[self._features])
-        query = {"Charges": ms["Charge"].values, "Embedding": query_embeddings}
+        query_charges = ms["Charge"].values
 
-        knn_index = NNDescent(prototypes["Embedding"], metric="cosine", n_jobs=-1)
-        neighbours, distances = knn_index.query(query["Embedding"], k=k_neighbours)
+        prototype_embeddings = prototypes["Embedding"]
+        prototype_charges = prototypes["Charge"]
+
+        if use_anchors:
+            # normalize embeddings
+            means = np.mean(query_embeddings, axis=0)
+            query_embeddings -= means
+            prototype_embeddings -= means
+
+            anchors = self._select_anchors(prototype_embeddings)
+
+            prototype_representation = self._compute_relative_representations(
+                prototype_embeddings, anchors
+            )
+            query_representation = self._compute_relative_representations(
+                query_embeddings, anchors
+            )
+
+            # recover original embeddings - keep in-place to save memory
+            query_embeddings += means
+            prototype_embeddings += means
+
+        else:
+            prototype_representation = prototype_embeddings
+            query_representation = query_embeddings
+
+        knn_index = NNDescent(
+            prototype_representation, metric=distance_metric, n_jobs=-1
+        )
+
+        if verbose:
+            print(f"computing {k_neighbours}-nearest neighbour prototypes...")
+
+        neighbours, distances = knn_index.query(query_representation, k=k_neighbours)
 
         neighbours_weights = self._compute_weights(distances)
         neighbours_charges = np.array(
-            [prototypes["Charge"][q_neighbours] for q_neighbours in neighbours]
+            [prototype_charges[q_neighbours] for q_neighbours in neighbours]
         )
 
+        if verbose:
+            print("computing confidence and selecting identities...")
+
         identities_args, confidence = self._compute_prediction_with_charge_filter(
-            query["Charges"], neighbours_weights, neighbours_charges
+            query_charges, neighbours_weights, neighbours_charges
         )
 
         identities_ids = neighbours[
@@ -195,7 +248,66 @@ class Peptideprotonet:
 
         return identities, confidence
 
-    def _compute_prototypes(self, msms: pd.DataFrame) -> Dict[str, np.ndarray]:
+    def _select_anchors(
+        self, latent_embeddings: np.ndarray, n_anchors=80
+    ) -> np.ndarray:
+        """
+        Select anchors from the latent embeddings using uniform sampling.
+
+        Parameters
+        ----------
+        latent_embeddings
+            Latent embeddings to consider when selecting anchors.
+
+        n_anchors
+            Number of anchors to select.
+
+        Returns
+        -------
+            Anchors.
+        """
+
+        anchors_idx = np.random.choice(
+            latent_embeddings.shape[0], size=n_anchors, replace=False
+        )
+        anchors = latent_embeddings[anchors_idx]
+
+        return anchors.copy()
+
+    def _compute_relative_representations(
+        self, xs: np.ndarray, anchors: np.ndarray
+    ) -> np.ndarray:
+        """
+        Helper function to compute relative representations.
+
+        Parameters
+        ----------
+        xs
+            Embeddings.
+
+        anchors
+            Anchors.
+
+        Returns
+        -------
+            Relative representations.
+        """
+
+        assert (
+            xs.shape[1] == anchors.shape[1]
+        ), "xs and anchors must have the same number of features"
+
+        # use cosine-simularity to compute relative representations
+        anchors_norm = np.linalg.norm(anchors, axis=1)
+        xs_norm = np.linalg.norm(xs, axis=1)
+        cosine_simularity = np.dot(anchors, xs.T) / np.outer(anchors_norm, xs_norm)
+        relative_representation = cosine_simularity.T
+
+        return relative_representation
+
+    def _compute_prototypes(
+        self, msms: pd.DataFrame, verbose=False
+    ) -> Dict[str, np.ndarray]:
         """
         Helper function to compute prototypes.
 
@@ -204,10 +316,16 @@ class Peptideprotonet:
         msms
             Support set with the columns: ['PrecursorID', 'Charge', 'Mass', 'm/z', 'Retention time', 'Retention length', 'Ion mobility index', 'Ion mobility length', 'Number of isotopic peaks']
 
+        verbose
+            Whether to print progress.
+
         Returns
         -------
             Prototypes with the columns: ['PrecursorID', 'Charge', 'Embedding']
         """
+
+        if verbose:
+            print("computing prototypes...")
 
         support_embeddings = self.get_latent_representations(msms[self._features])
 
@@ -252,9 +370,9 @@ class Peptideprotonet:
         """
 
         stds = np.mean(distances, axis=1)
-        stds = (stds) ** 2
+        stds = stds**2
         stds = stds.reshape(-1, 1)
-        distances_tilda = np.exp(-np.true_divide(distances ** 2, stds))
+        distances_tilda = np.exp(-np.true_divide(distances**2, stds))
         return distances_tilda
 
         """
@@ -301,22 +419,17 @@ class Peptideprotonet:
             Predictions and confidence.
         """
 
-        N = neighbours_weights.shape[0]
-        predictions = np.zeros((N,), dtype=np.int32)
-        confidence = np.zeros((N,), dtype=np.float32)
+        filtered_weights = neighbours_weights * (
+            neighbours_charges == query_charges.reshape(-1, 1)
+        )
 
-        for i in range(N):
-            query_weights = neighbours_weights[i]
-            query_charge = query_charges[i]
-            nb_charges = neighbours_charges[i]
+        denominator = np.sum(filtered_weights, axis=1).reshape(-1, 1)
+        denominator[denominator == 0] = 1
 
-            ps = query_weights * (query_charge == nb_charges)
+        # normalize confidences based on charges between neighbour and query matching
+        probs = filtered_weights / denominator
 
-            # @NOTE: handle division-by-0, by setting the output "weight" to 0 instead of nan.
-            # probs = ps / np.sum(ps)
-            probs = np.divide(ps, np.sum(ps), out=np.zeros_like(ps), where=ps != 0)
-
-            predictions[i] = np.argmax(probs)
-            confidence[i] = np.max(probs)
+        predictions = np.argmax(probs, axis=1)
+        confidence = np.max(probs, axis=1)
 
         return predictions, confidence
