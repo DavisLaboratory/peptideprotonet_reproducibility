@@ -176,7 +176,7 @@ class Peptideprotonet:
         query_embeddings = self.get_latent_representations(ms[self._features])
         query = {"Charges": ms["Charge"].values, "Embedding": query_embeddings}
 
-        knn_index = NNDescent(prototypes["Embedding"], metric="euclidean", n_jobs=-1)
+        knn_index = NNDescent(prototypes["Embedding"], metric="cosine", n_jobs=-1)
         neighbours, distances = knn_index.query(query["Embedding"], k=k_neighbours)
 
         neighbours_weights = self._compute_weights(distances)
