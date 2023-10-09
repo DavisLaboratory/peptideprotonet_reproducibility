@@ -7,6 +7,7 @@ import pandas as pd
 import torch
 from sklearn.preprocessing import StandardScaler
 from pynndescent import NNDescent
+from scipy.special import softmax
 
 from ._module import Encoder
 
@@ -252,21 +253,31 @@ class Peptideprotonet:
         """
 
         # convert distances to affinities
-        stds = np.std(distances, axis=1)
-        stds = (2.0 / stds) ** 2
+        stds = np.mean(distances, axis=1)
+        stds = (stds) ** 2
         stds = stds.reshape(-1, 1)
-        distances_tilda = np.exp(-np.true_divide(distances, stds))
+        distances_tilda = np.exp(-np.true_divide(distances ** 2, stds))
+        return distances_tilda
+#         stds = np.std(distances, axis=1)
+#         stds = (2.0 / stds) ** 2
+#         stds = stds.reshape(-1, 1)
+#         distances_tilda = np.exp(-np.true_divide(distances, stds))
+#         return distances_tilda
+#         return 1.0-distances # cosine similarity
+
 
         # @NOTE: handle division-by-0, by setting the output "weight" to 0 instead of nan.
         # weights = distances_tilda / np.sum(distances_tilda, axis=1, keepdims=True)
-        weights = np.divide(
-            distances_tilda,
-            np.sum(distances_tilda, axis=1, keepdims=True),
-            out=np.zeros_like(distances_tilda),
-            where=distances_tilda != 0,
-        )
+#         weights = np.divide(
+#             distances_tilda,
+#             np.sum(distances_tilda, axis=1, keepdims=True),
+#             out=np.zeros_like(distances_tilda),
+#             where=distances_tilda != 0,
+#         )
+#         weights = softmax(distances, axis=1)
 
-        return weights
+#         return weights
+
 
     def _compute_prediction_with_charge_filter(
         self,
@@ -303,10 +314,11 @@ class Peptideprotonet:
             nb_charges = neighbours_charges[i]
 
             ps = query_weights * (query_charge == nb_charges)
+            probs = ps
 
             # @NOTE: handle division-by-0, by setting the output "weight" to 0 instead of nan.
             # probs = ps / np.sum(ps)
-            probs = np.divide(ps, np.sum(ps), out=np.zeros_like(ps), where=ps != 0)
+#             probs = np.divide(ps, np.sum(ps), out=np.zeros_like(ps), where=ps != 0)
 
             predictions[i] = np.argmax(probs)
             confidence[i] = np.max(probs)
