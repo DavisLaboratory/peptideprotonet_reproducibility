@@ -251,6 +251,13 @@ class Peptideprotonet:
             Weights for each neighbour.
         """
 
+        stds = np.mean(distances, axis=1)
+        stds = (stds) ** 2
+        stds = stds.reshape(-1, 1)
+        distances_tilda = np.exp(-np.true_divide(distances ** 2, stds))
+        return distances_tilda
+
+        """
         # convert distances to affinities
         stds = np.std(distances, axis=1)
         stds = (2.0 / stds) ** 2
@@ -267,6 +274,7 @@ class Peptideprotonet:
         )
 
         return weights
+        """
 
     def _compute_prediction_with_charge_filter(
         self,
