@@ -109,8 +109,10 @@ class Peptideprotonet:
         self,
         ms: pd.DataFrame,
         msms: pd.DataFrame,
+        ms2: pd.DataFrame=None,
         k_neighbours=5,
         use_anchors=True,
+        n_anchors = 80,
         verbose=True,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -144,12 +146,16 @@ class Peptideprotonet:
         """
 
         prototypes = self._compute_prototypes(msms, verbose=verbose)
+        if ms2 is not None:
+            inexperiment_prototypes = self._compute_prototypes(ms2, verbose=verbose)
 
         identities, confidence = self._propagate_using_prototypes(
             ms,
             prototypes,
             k_neighbours=k_neighbours,
+            inexperiment_prototypes = inexperiment_prototypes if (ms2 is not None) else None,
             use_anchors=use_anchors,
+            n_anchors = n_anchors,
             verbose=verbose,
         )
 
@@ -159,9 +165,11 @@ class Peptideprotonet:
         self,
         ms: pd.DataFrame,
         prototypes: Dict[str, np.ndarray],
+        inexperiment_prototypes: Dict[str, np.ndarray]=None,
         k_neighbours=5,
         distance_metric="euclidean",
         use_anchors=True,
+        n_anchors = 80,
         verbose=True,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -204,7 +212,11 @@ class Peptideprotonet:
             query_embeddings -= means
             prototype_embeddings -= means
 
-            anchors = self._select_anchors(prototype_embeddings)
+            if inexperiment_prototypes is not None:
+                print('using in-experiment prototypes as anchors')
+                anchors = self._select_anchors(inexperiment_prototypes["Embedding"], n_anchors = n_anchors)
+            else:
+                anchors = self._select_anchors(prototype_embeddings, n_anchors = n_anchors)
 
             prototype_representation = self._compute_relative_representations(
                 prototype_embeddings, anchors
