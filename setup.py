@@ -15,6 +15,10 @@ setup(
         'seaborn',
         'pandas',
         'umap-learn',
+        'fair-esm',         # for esm
+        'transformers',     # for protT5
+        'sentencepiece',    # for protT5
+        'protobuf'          # for protT5
     ]
 
 )
