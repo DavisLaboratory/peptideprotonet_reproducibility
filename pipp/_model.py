@@ -7,6 +7,10 @@ import pandas as pd
 import torch
 from sklearn.preprocessing import StandardScaler
 from pynndescent import NNDescent
+import esm
+import umap
+import matplotlib.pyplot as plt
+import random
 
 from ._module import Encoder
 
@@ -331,6 +335,7 @@ class Peptideprotonet:
 
         prototypes = []  # list of (precursor_id, charge, embedding)
         precursor_groups = msms.groupby(["PrecursorID"])
+        prototypes_for_plm = []     # list of (proteins, sequence, species) for the PLM
 
         for group in precursor_groups:
             (precursor_id,) = group[0]
@@ -340,6 +345,12 @@ class Peptideprotonet:
             prototypes.append(
                 (precursor_id, charge, np.mean(support_embeddings[ilocs], axis=0))
             )
+            protein_name = group[1]['Proteins'].iloc[0]
+            sequence = group[1]['Sequence'].iloc[0]
+            species = group[1]['Species'].iloc[0]
+            prototypes_for_plm.append((protein_name, sequence, species))
+
+        self._esm_call_list(prototypes_for_plm)
 
         precursor_ids, charges, embeddings = zip(*prototypes)
 
@@ -433,3 +444,99 @@ class Peptideprotonet:
         confidence = np.max(probs, axis=1)
 
         return predictions, confidence
+
+    '''
+    Takes a list of tuples in the form ('Proteins', 'Sequence', 'Species').
+    Forwards the sequences to the Potein Language Model ESM-2 and retrieves their representations.
+    Reduces the representations with UMAP and plots them labeled by their species.
+    Goal: Get representations that effectively separate sequences by their species.
+    Todo:
+    - Make sure that the order of sequences and their species are preserved.
+    - Add species legend to the plot
+    - Compare ESM-2 dimensions (small, medium, big) and layer numbers in particular.
+      Make it possible to give the model as an input to the function.
+    - Implement a metric to measure species separation. 
+    - (Later:) Compare the ESM-2 output with the ProtT5 model.
+    '''
+    def _esm_call_list(self,
+                       data_with_species: list[tuple[str, str, str]]
+                       ):
+        # Load ESM-2 model. It is currently predefined to download "esm2_t33_650M_UR50D".
+        model, alphabet = (esm.pretrained.esm2_t33_650M_UR50D())
+        batch_converter = alphabet.get_batch_converter()
+        model.eval()  # disables dropout for deterministic results
+
+        # Prepare data (first 2 sequences from ESMStructuralSplitDataset superfamily / 4)
+        # use protein names or leading razor protein as identifier/tag
+        # use unmodified sequence
+
+        # Take only a subset of the data (duplicates allowed) due to extensive computation.
+        subset_size = 80000
+        random_subset_with_species = random.choices(data_with_species, k=subset_size)
+
+        # Create copy with only the 'Name' and 'Sequence' columns and leave the 'Species' column out.
+        random_subset_without_species = [(x[0], x[1]) for x in random_subset_with_species]
+
+        # Initialize list for ESM-2 representations
+        sequence_representations = []
+
+        # Iterate through the list in bulks because the execution is more stable that way.
+        bulk_size = 500
+        for i in range(0, len(random_subset_without_species), bulk_size):
+            print("i:", i)
+            bulk = random_subset_without_species[i:i + bulk_size]
+
+            # Use batch converter as done in ESM-2 example.
+            batch_labels, batch_strs, batch_tokens = batch_converter(bulk)
+            batch_lens = (batch_tokens != alphabet.padding_idx).sum(1)
+
+            # Extract per-residue representations (on CPU) as done in ESM-2 example.
+            # Todo: try different layer numbers
+            with torch.no_grad():
+                results = model(batch_tokens, repr_layers=[33], return_contacts=True)
+            token_representations = results["representations"][33]
+
+            # Generate per-sequence representations via averaging as done in ESM-2 example.
+            # NOTE: token 0 is always a beginning-of-sequence token, so the first residue is token 1.
+            for i, tokens_len in enumerate(batch_lens):
+                sequence_representations.append(token_representations[i, 1: tokens_len - 1].mean(0))
+
+        # Reduce ESM-2 representation to two-dimensional UMAP-embedding.
+        reducer = umap.UMAP(metric='cosine')
+        umap_embedding = reducer.fit_transform(sequence_representations)
+
+        # Plot UMAP-embedding without species.
+        fig, ax = plt.subplots(figsize=(14, 12), ncols=1, nrows=1)
+        sp = ax.scatter(umap_embedding[:, 0], umap_embedding[:, 1], s=0.1)
+        ax.set_xlabel('UMAP1')
+        ax.set_ylabel('UMAP2')
+        ax.set_title('PLM embedding')
+        fig.colorbar(sp)
+        plt.show()
+
+        # Connect UMAP-embedding with species label.
+        # Todo: make sure that the order is preserved.
+        umap_with_species = []
+        for i in range(len(umap_embedding)):
+            umap_with_species.append((umap_embedding[i], random_subset_with_species[i][2]))
+
+        # Prepare plot of UMAP-embedding with species.
+        colors = ['red', 'blue', 'green']
+        color_map = {species: color for species, color in zip(('HeLa', 'Yeast', 'Ecoli'), colors)}
+        species_size = {'HeLa': .1, 'Yeast': .4, 'Ecoli': 1.4}
+        fig, ax = plt.subplots(figsize=(18, 18))
+        ax.set_xlabel('UMAP1')
+        ax.set_ylabel('UMAP2')
+        ax.set_title('PLM prototypes | latent space - Species')
+
+        # Plot UMAP-embedding with species.
+        # Todo: add species legend to the plot
+        for species, color in color_map.items():
+            for x in umap_with_species:
+                if x[1] == species:
+                    umap1 = x[0][0]
+                    umap2 = x[0][1]
+                    ax.scatter(umap1, umap2, c=color, s=species_size[species], alpha=0.6)
+
+        ax.legend(markerscale=6)
+        plt.show()
