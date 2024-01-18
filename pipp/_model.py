@@ -447,22 +447,23 @@ class Peptideprotonet:
 
     '''
     Takes a list of tuples in the form ('Proteins', 'Sequence', 'Species').
+    Takes a model location that can either be a file path or a string of the ESM model to download.
+    Default is currently "esm2_t33_650M_UR50D".
     Forwards the sequences to the Potein Language Model ESM-2 and retrieves their representations.
     Reduces the representations with UMAP and plots them labeled by their species.
     Goal: Get representations that effectively separate sequences by their species.
     Todo:
     - Make sure that the order of sequences and their species are preserved.
-    - Add species legend to the plot
     - Compare ESM-2 dimensions (small, medium, big) and layer numbers in particular.
-      Make it possible to give the model as an input to the function.
     - Implement a metric to measure species separation. 
     - (Later:) Compare the ESM-2 output with the ProtT5 model.
     '''
     def _esm_call_list(self,
-                       data_with_species: list[tuple[str, str, str]]
+                       data_with_species: list[tuple[str, str, str]],
+                       model_location="esm2_t33_650M_UR50D"
                        ):
-        # Load ESM-2 model. It is currently predefined to download "esm2_t33_650M_UR50D".
-        model, alphabet = (esm.pretrained.esm2_t33_650M_UR50D())
+        # Load ESM-2 model. Either load model from path or download it.
+        model, alphabet = esm.pretrained.load_model_and_alphabet(model_location)
         batch_converter = alphabet.get_batch_converter()
         model.eval()  # disables dropout for deterministic results
 
@@ -471,7 +472,7 @@ class Peptideprotonet:
         # use unmodified sequence
 
         # Take only a subset of the data (duplicates allowed) due to extensive computation.
-        subset_size = 80000
+        subset_size = 100
         random_subset_with_species = random.choices(data_with_species, k=subset_size)
 
         # Create copy with only the 'Name' and 'Sequence' columns and leave the 'Species' column out.
@@ -530,13 +531,11 @@ class Peptideprotonet:
         ax.set_title('PLM prototypes | latent space - Species')
 
         # Plot UMAP-embedding with species.
-        # Todo: add species legend to the plot
         for species, color in color_map.items():
-            for x in umap_with_species:
-                if x[1] == species:
-                    umap1 = x[0][0]
-                    umap2 = x[0][1]
-                    ax.scatter(umap1, umap2, c=color, s=species_size[species], alpha=0.6)
+            x_data = [x[0] for x in umap_with_species if x[1] == species]
+            if len(x_data) > 0:
+                umap1, umap2 = zip(*x_data)
+                ax.scatter(umap1, umap2, c=color, s=species_size[species], label=species, alpha=0.6)
 
-        ax.legend(markerscale=6)
+        ax.legend()
         plt.show()
