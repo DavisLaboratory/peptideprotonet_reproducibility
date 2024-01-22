@@ -335,7 +335,7 @@ class Peptideprotonet:
 
         prototypes = []  # list of (precursor_id, charge, embedding)
         precursor_groups = msms.groupby(["PrecursorID"])
-        prototypes_for_plm = []     # list of (proteins, sequence, species) for the PLM
+        prototypes_for_plm = []  # list of (proteins, sequence, species) for the PLM
 
         for group in precursor_groups:
             (precursor_id,) = group[0]
@@ -349,6 +349,46 @@ class Peptideprotonet:
             sequence = group[1]['Sequence'].iloc[0]
             species = group[1]['Species'].iloc[0]
             prototypes_for_plm.append((protein_name, sequence, species))
+
+        '''
+        # FIND SEQUENCES THAT ARE SHARED BETWEEN AT LEAST TWO SPECIES
+        # create list of precursorIDs
+        unique_precursor_ids = msms['PrecursorID'].drop_duplicates().tolist()
+
+        # cut off charge at the end
+        unique_precursor_ids_without_charge = []
+
+        for original_string in unique_precursor_ids:
+            # Find the index of the second '_'
+            first_underscore_index = original_string.find('_')
+            second_underscore_index = original_string.find('_', first_underscore_index + 1)
+
+            # Cut off the end after the second '_'
+            if second_underscore_index != -1:
+                cut_off_string = original_string[:second_underscore_index]
+                unique_precursor_ids_without_charge.append(cut_off_string)
+            else:
+                unique_precursor_ids_without_charge.append(original_string)
+
+        # drop duplicates
+        unique_precursor_ids_without_charge = list(set(unique_precursor_ids_without_charge))
+
+        # find sequences that are shared among species
+        result_strings = []
+
+        for i, first_part in enumerate(unique_precursor_ids_without_charge):
+            parts_i = first_part.split('_', 1)
+            for j, second_part in enumerate(unique_precursor_ids_without_charge[i + 1:], start=i + 1):
+                parts_j = second_part.split('_', 1)
+
+                # Check if the substrings after the first '_' are the same
+                if len(parts_i) > 1 and len(parts_j) > 1 and parts_i[1] == parts_j[1]:
+                    result_strings.append(first_part)
+                    result_strings.append(second_part)
+                    print(first_part, second_part)
+
+        print(result_strings)
+        '''
 
         self._esm_call_list(prototypes_for_plm)
 
@@ -447,8 +487,6 @@ class Peptideprotonet:
 
     '''
     Takes a list of tuples in the form ('Proteins', 'Sequence', 'Species').
-    Takes a model location that can either be a file path or a string of the ESM model to download.
-    Default is currently "esm2_t33_650M_UR50D".
     Forwards the sequences to the Potein Language Model ESM-2 and retrieves their representations.
     Reduces the representations with UMAP and plots them labeled by their species.
     Goal: Get representations that effectively separate sequences by their species.
@@ -460,9 +498,57 @@ class Peptideprotonet:
     '''
     def _esm_call_list(self,
                        data_with_species: list[tuple[str, str, str]],
-                       model_location="esm2_t33_650M_UR50D"
+                       model_location="esm2_t6_8M_UR50D"
                        ):
-        # Load ESM-2 model. Either load model from path or download it.
+
+        # Add true positive and false positive examples that are shared among all three species.
+        true_positives = [
+            ('tp1', '', ''),
+            ('tp2', '', ''),
+            ('tp3', '', ''),
+            ('tp4', '', ''),
+            ('tp5', '', '')
+        ]
+
+        false_positives = [
+            ('fp1', '', ''),
+            ('fp2', '', ''),
+            ('fp3', '', ''),
+            ('fp4', '', ''),
+            ('fp5', '', '')
+        ]
+
+        # Add sequences that are shared between HeLa and Yeast.
+        shared_sequences = [
+            ('shared1', 'GLLLYGPPGTGK'),
+            ('shared2', 'LQLWDTAGQER'),
+            ('shared3', 'VAVVAGYGDVGK'),
+            ('shared4', 'NMYQCQMGK'),
+            ('shared5', 'YHPGYFGK'),
+            ('shared6', 'DAHQSLLATR'),
+            ('shared7', 'VPAINVNDSVTK'),
+            ('shared8', 'VSTEVDAR'),
+            ('shared9', 'MLSCAGADR'),
+            ('shared10', 'LSDLLDWK'),
+            ('shared11', 'QAVDVSPLR'),
+            ('shared12', 'ETAEAYLGK'),
+            ('shared13', 'STIGVEFATR'),
+            ('shared14', 'YDCSSADINPIGGISK'),
+            ('shared15', 'TTIFSPEGR'),
+            ('shared16', 'QAVDVSPLRR'),
+            ('shared17', 'ATAGDTHLGGEDFDNR'),
+            ('shared18', 'RQAVDVSPLR'),
+            ('shared19', 'VTILGHVQR'),
+            ('shared20', 'FDNLYGCR'),
+            ('shared21', 'GILFVGSGVSGGEEGAR'),
+            ('shared22', 'FVIGGPQGDAGLTGR'),
+            ('shared23', 'GVLMYGPPGTGK'),
+            ('shared24', 'AQIWDTAGQER'),
+            ('shared25', 'YENNVMNIR'),
+            ('shared26', 'FPFAANSR')
+        ]
+
+        # Load ESM-2 model. It is currently predefined to download "esm2_t33_650M_UR50D".
         model, alphabet = esm.pretrained.load_model_and_alphabet(model_location)
         batch_converter = alphabet.get_batch_converter()
         model.eval()  # disables dropout for deterministic results
@@ -472,7 +558,7 @@ class Peptideprotonet:
         # use unmodified sequence
 
         # Take only a subset of the data (duplicates allowed) due to extensive computation.
-        subset_size = 100
+        subset_size = 1000
         random_subset_with_species = random.choices(data_with_species, k=subset_size)
 
         # Create copy with only the 'Name' and 'Sequence' columns and leave the 'Species' column out.
@@ -492,23 +578,47 @@ class Peptideprotonet:
             batch_lens = (batch_tokens != alphabet.padding_idx).sum(1)
 
             # Extract per-residue representations (on CPU) as done in ESM-2 example.
-            # Todo: try different layer numbers
+            # Todo: try different layer numbers and fit them to the input model
             with torch.no_grad():
-                results = model(batch_tokens, repr_layers=[33], return_contacts=True)
-            token_representations = results["representations"][33]
+                results = model(batch_tokens, repr_layers=[6], return_contacts=True)
+            token_representations = results["representations"][6]
 
             # Generate per-sequence representations via averaging as done in ESM-2 example.
             # NOTE: token 0 is always a beginning-of-sequence token, so the first residue is token 1.
             for i, tokens_len in enumerate(batch_lens):
                 sequence_representations.append(token_representations[i, 1: tokens_len - 1].mean(0))
 
+        # Compute example representations of shared sequences.
+        example_representations = []
+
+        batch_labels, batch_strs, batch_tokens = batch_converter(shared_sequences)
+        batch_lens = (batch_tokens != alphabet.padding_idx).sum(1)
+
+        with torch.no_grad():
+            results = model(batch_tokens, repr_layers=[6], return_contacts=True)
+        token_representations = results["representations"][6]
+
+        for i, tokens_len in enumerate(batch_lens):
+            example_representations.append(token_representations[i, 1: tokens_len - 1].mean(0))
+
         # Reduce ESM-2 representation to two-dimensional UMAP-embedding.
         reducer = umap.UMAP(metric='cosine')
         umap_embedding = reducer.fit_transform(sequence_representations)
+        example_umap_embedding = reducer.fit_transform(example_representations)
 
         # Plot UMAP-embedding without species.
         fig, ax = plt.subplots(figsize=(14, 12), ncols=1, nrows=1)
         sp = ax.scatter(umap_embedding[:, 0], umap_embedding[:, 1], s=0.1)
+        ax.set_xlabel('UMAP1')
+        ax.set_ylabel('UMAP2')
+        ax.set_title('PLM embedding')
+        fig.colorbar(sp)
+        plt.show()
+
+        # Plot UMAP-embedding of example sequences that are shared between HeLa and Yeast.
+        fig, ax = plt.subplots(figsize=(14, 12), ncols=1, nrows=1)
+        ax.scatter(umap_embedding[:, 0], umap_embedding[:, 1], s=0.01, color='red')
+        sp = ax.scatter(example_umap_embedding[:, 0], example_umap_embedding[:, 1], s=0.1)
         ax.set_xlabel('UMAP1')
         ax.set_ylabel('UMAP2')
         ax.set_title('PLM embedding')
@@ -525,7 +635,7 @@ class Peptideprotonet:
         colors = ['red', 'blue', 'green']
         color_map = {species: color for species, color in zip(('HeLa', 'Yeast', 'Ecoli'), colors)}
         species_size = {'HeLa': .1, 'Yeast': .4, 'Ecoli': 1.4}
-        fig, ax = plt.subplots(figsize=(18, 18))
+        fig, ax = plt.subplots(figsize=(14, 14))
         ax.set_xlabel('UMAP1')
         ax.set_ylabel('UMAP2')
         ax.set_title('PLM prototypes | latent space - Species')
