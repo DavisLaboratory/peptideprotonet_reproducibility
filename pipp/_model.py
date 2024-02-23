@@ -1,23 +1,34 @@
 import logging
 
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict
 
 import numpy as np
 import pandas as pd
-from numpy import ndarray
 from sklearn.preprocessing import StandardScaler
 from pynndescent import NNDescent
 import esm
 import umap
 import matplotlib.pyplot as plt
 import random
+import csv
 import pickle
+from transformers import T5Tokenizer, T5EncoderModel
 import torch
+import re
 from scipy.spatial.distance import euclidean
 
 from ._module import Encoder
 
 logger = logging.getLogger(__name__)
+
+'''
+Files to generate:
+- example_data/esm2_t33_650M_UR50D_embeddings.npy
+- example_data/all_prototypes.npz
+- example_data/protT5_embeddings_df.pkl
+- example_data/final_false_list.pkl
+- example_data/final_true_list.pkl
+'''
 
 
 class Peptideprotonet:
@@ -320,6 +331,8 @@ class Peptideprotonet:
         prototype_embeddings = prototypes["Embedding"]
         prototype_charges = prototypes["Charge"]
 
+        print('Computing relative representations...')
+
         if use_anchors:
             means = np.mean(query_embeddings, axis=0)
             query_embeddings -= means
@@ -345,6 +358,32 @@ class Peptideprotonet:
                 query_representation = self._compute_relative_representations(
                     query_embeddings, anchors['MS1_embedding']
                 )
+
+            # plot the relative representations of the prototypes
+            reducer = umap.UMAP(metric='cosine')
+            umap_embedding = reducer.fit_transform(prototype_representation)
+            fig, ax = plt.subplots(figsize=(14, 14))
+            ax.set_xlabel('UMAP1')
+            ax.set_ylabel('UMAP2')
+            ax.set_title('Prototype relative representations')
+            umap1 = umap_embedding[:, 0]
+            umap2 = umap_embedding[:, 1]
+            ax.scatter(umap1, umap2, c='blue', s=.1, label='Prototype', alpha=.5)
+            ax.legend(markerscale=8)
+            plt.show()
+
+            # plot the relative representations of the MS1 datapoints
+            umap_embedding = reducer.fit_transform(query_representation)
+            fig, ax = plt.subplots(figsize=(14, 14))
+            ax.set_xlabel('UMAP1')
+            ax.set_ylabel('UMAP2')
+            ax.set_title('MS1 relative representations')
+            umap1 = umap_embedding[:, 0]
+            umap2 = umap_embedding[:, 1]
+            ax.scatter(umap1, umap2, c='green', s=.1, label='MS1 datapoint', alpha=.5)
+            ax.legend(markerscale=8)
+            plt.show()
+
 
             # recover original embeddings - keep in-place to save memory
             query_embeddings += means
@@ -397,7 +436,7 @@ class Peptideprotonet:
 
     def _select_anchors(
         self, latent_embeddings: np.ndarray, concatenated_embeddings: np.ndarray, n_anchors=100
-    ) -> dict[str, ndarray[Any, Any]]:
+    ) -> np.ndarray:
         """
         Select anchors from the latent embeddings using uniform sampling.
 
@@ -570,7 +609,7 @@ class Peptideprotonet:
         '''
         esm_embeddings_available = True
         if esm_embeddings_available:
-            esm_embeddings_np = np.load('example_data/esm2_t33_650M_UR50D_embeddings.npy')
+            esm_embeddings_np = np.load('example_data/esm2_t6_8M_UR50D_embeddings.npy')
         else:
             '''
             Prepare ESM:
@@ -591,7 +630,7 @@ class Peptideprotonet:
         prototypes['Esm_embedding'] = esm_embeddings_np
 
         # save prototypes to file
-        # np.savez('example_data/all_prototypes.npz', **prototypes)
+        np.savez('example_data/all_prototypes.npz', **prototypes)
 
         return prototypes
 
@@ -711,6 +750,7 @@ class Peptideprotonet:
         plt.show()
 
         # Connect general UMAP-embedding with species label.
+        # Todo: make sure that the order is preserved.
         umap_with_species = []
         for i in range(len(umap_embedding)):
             umap_with_species.append((umap_embedding[i], random_subset_with_species[i][2]))
@@ -737,8 +777,8 @@ class Peptideprotonet:
     '''
     Function that was used to store false/true transfer example prototypes and their neighbors.
     The actual false/true transfer experiments are now conducted in the following two scripts:
-    - examples/transfer_example_neighbours.py
-    - protT5_embeddings.py
+    - examples/ESM2_neighbor_transfer_example.py
+    - examples/protT5_neighbor_transfer_example_and_embeddings.py
     '''
     def _esm_call_examples(self, model_location, false_positives, true_positives, false_transfer_prototypes, true_transfer_prototypes):
 
