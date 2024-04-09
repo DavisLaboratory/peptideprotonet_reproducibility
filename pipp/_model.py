@@ -141,7 +141,8 @@ class Peptideprotonet:
         conduct_neighbour_experiment=False,
         use_preselected_anchors=False,
         anchors_idx=[],
-        use_concatenated_embeddings=True
+        use_concatenated_embeddings=True,
+        hela_only=False
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Propagate the identities/labels from the support set to the query set.
@@ -200,7 +201,8 @@ class Peptideprotonet:
                                               use_precomputed_esm_embeddings=use_precomputed_esm_embeddings,
                                               esm_embedding_path=esm_embedding_path,
                                               n_representation_layer=n_representation_layer,
-                                              conduct_neighbour_experiment=conduct_neighbour_experiment)
+                                              conduct_neighbour_experiment=conduct_neighbour_experiment,
+                                              hela_only=hela_only)
 
         '''
         Between prototype computation and propagation:
@@ -691,28 +693,45 @@ class Peptideprotonet:
          - Select anchors only from peptides that were present in 9/10 or 10/10 runs
         '''
 
-        # prefilter prototypes for species from query data set (here: HeLa)
-        right_species_indices = np.where(prototypes['Species'] == 'HeLa')[0]
-        filtered_prototypes = {key: value[right_species_indices] for key, value in prototypes.items()}
+        preselect_anchors = False
+        if preselect_anchors:
+            # filter out peptides that were in too few runs
+            filtered_latent_embeddings = prototypes['Embedding'][
+                ((prototypes['Run Count'] > 5) & ((prototypes['Species'] == 'Ecoli') | (prototypes['Species'] == 'Yeast'))) |
+                ((prototypes['Run Count'] > 15) & (prototypes['Species'] == 'HeLa'))]
+            filtered_concatenated_embeddings = prototypes['Concatenated_embedding'][
+                ((prototypes['Run Count'] > 5) & ((prototypes['Species'] == 'Ecoli') | (prototypes['Species'] == 'Yeast'))) |
+                ((prototypes['Run Count'] > 15) & (prototypes['Species'] == 'HeLa'))]
 
-        if use_preselected_anchors:
-            print("Anchor indexes:", preselected_anchors_idx)
-            if use_concatenated_embeddings:
-                anchors = {'MS1_embedding': filtered_prototypes['Embedding'][preselected_anchors_idx],
-                           'Concatenated_embedding': filtered_prototypes['Concatenated_embedding'][preselected_anchors_idx]}
-            else:
-                anchors = {'MS1_embedding': filtered_prototypes['Embedding'][preselected_anchors_idx]}
-        else:
-            random_state = np.random.RandomState()
-            anchors_idx = random_state.choice(
-                filtered_prototypes['Embedding'].shape[0], size=n_anchors, replace=False
+            anchors_idx = np.random.choice(
+                filtered_latent_embeddings.shape[0], size=n_anchors, replace=False
             )
-            print("Anchor indexes:", anchors_idx)
-            if use_concatenated_embeddings:
-                anchors = {'MS1_embedding': filtered_prototypes['Embedding'][anchors_idx],
-                           'Concatenated_embedding': filtered_prototypes['Concatenated_embedding'][anchors_idx]}
+            anchors = {'MS1_embedding': filtered_latent_embeddings[anchors_idx],
+                        'Concatenated_embedding': filtered_concatenated_embeddings[anchors_idx]}
+
+        else:
+            # prefilter prototypes for species from query data set (here: HeLa)
+            right_species_indices = np.where(prototypes['Species'] == 'HeLa')[0]
+            filtered_prototypes = {key: value[right_species_indices] for key, value in prototypes.items()}
+
+            if use_preselected_anchors:
+                print("Anchor indexes:", preselected_anchors_idx)
+                if use_concatenated_embeddings:
+                    anchors = {'MS1_embedding': filtered_prototypes['Embedding'][preselected_anchors_idx],
+                               'Concatenated_embedding': filtered_prototypes['Concatenated_embedding'][preselected_anchors_idx]}
+                else:
+                    anchors = {'MS1_embedding': filtered_prototypes['Embedding'][preselected_anchors_idx]}
             else:
-                anchors = {'MS1_embedding': filtered_prototypes['Embedding'][preselected_anchors_idx]}
+                random_state = np.random.RandomState()
+                anchors_idx = random_state.choice(
+                    filtered_prototypes['Embedding'].shape[0], size=n_anchors, replace=False
+                )
+                print("Anchor indexes:", anchors_idx)
+                if use_concatenated_embeddings:
+                    anchors = {'MS1_embedding': filtered_prototypes['Embedding'][anchors_idx],
+                               'Concatenated_embedding': filtered_prototypes['Concatenated_embedding'][anchors_idx]}
+                else:
+                    anchors = {'MS1_embedding': filtered_prototypes['Embedding'][preselected_anchors_idx]}
 
         # why do we use a copy?
         return anchors.copy()
@@ -755,7 +774,8 @@ class Peptideprotonet:
         esm2_model="esm2_t33_650M_UR50D",
         esm_embedding_path='example_data/esm2_t33_650M_UR50D_embeddings_6.npy',
         n_representation_layer=6,
-        conduct_neighbour_experiment=False
+        conduct_neighbour_experiment=False,
+        hela_only=False
     ) -> Dict[str, np.ndarray]:
         """
         Helper function to compute prototypes.
