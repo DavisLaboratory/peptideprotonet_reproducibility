@@ -1,6 +1,4 @@
-import numpy as np
 import pandas as pd
-from mpmath import visualization
 from pynndescent import NNDescent
 import esm
 import torch
@@ -13,11 +11,11 @@ from transformers import T5Tokenizer, T5EncoderModel
 import re
 
 '''
-This script is used to conduct the neighbour / species separation experiment with ESM-2.
-It requires the following files that contain false/true positives and their neighbours:
-    - 'example_data/final_false_list.pkl'
-    - 'example_data/final_true_list.pkl'
-Both files are created by running PXD014777_HeLA_Yeast_Ecoli.ipynb with setting conduct_neighbour_experiment = False
+This script is used to conduct the neighbour / species separation experiment with ESM-2 and ProtT5.
+It requires the following precomputed files that contain false/true positives and their neighbours:
+    - 'example_data/false_positives_and_neighbours.pkl'
+    - 'example_data/true_positives_and_neighbours.pkl'
+Both files are alternatively created by running PXD014777_HeLA_Yeast_Ecoli.ipynb with setting conduct_neighbour_experiment = False.
 It creates the output file 'example_data/neighbour_experiment_model_{model_name}_layer{representation_layer}.csv'
 and plots several visualizations.
 '''
@@ -181,8 +179,8 @@ def neighbour_experiment(
     )
 
     '''
-    Here, embeddings and neighbours are matched to their original PrecursorIDs and sequences in final_false_list and
-    final_true_list. Three different types of distances between false/true positives and their neighbours are computed:
+    Here, embeddings and neighbours are matched to their original PrecursorIDs and sequences in false_positives_and_neighbours and
+    true_positives_and_neighbours. Three different types of distances between false/true positives and their neighbours are computed:
         - pynn_distances_euclidean: 
         - pynn_distances_cosine
         - sklearn_distances
@@ -348,34 +346,34 @@ def neighbour_experiment(
 
 '''
 Here, two lists are loaded:
-    - final_false_list: list of tuples (false positive, 5 closest neighbours of false positive)
+    - false_positives_and_neighbours: list of tuples (false positive, 5 closest neighbours of false positive)
       a false positive is a precursor that was identified with a prototype with no 
       matching species. False positives are given here as a tuple (precursorID, sequence).
       The 5 closest neighbours of the false positive are given as a list of tuples (precursorID, sequence) with one
       tuple for each neighbour. 
-    - final_true_list: same structure as final_false_list, but with a true positive and its 5 closest neighbours. 
+    - true_positives_and_neighbours: same structure as false_positives_and_neighbours, but with a true positive and its 5 closest neighbours. 
       A true positive is a precursor that was identified with a prototype with matching species.
 '''
-with open('example_data/final_false_list.pkl', 'rb') as file:
-    final_false_list = pickle.load(file)
-with open('example_data/final_true_list.pkl', 'rb') as file:
-    final_true_list = pickle.load(file)
+with open('example_data/false_positives_and_neighbours.pkl', 'rb') as file:
+    false_positives_and_neighbours = pickle.load(file)
+with open('example_data/true_positives_and_neighbours.pkl', 'rb') as file:
+    true_positives_and_neighbours = pickle.load(file)
 
 '''
 All false positives and their neighbours are put in a the common list false_neighbour_list which will be the input for
-ESM-2. The ESM-2 embeddings are later matched again to the the final_false_list. The same is applied to the 
-true_neighbour_list and final_true_list. This step was not necessary, instead final_false_list and final_true_list
+ESM-2. The ESM-2 embeddings are later matched again to the the false_positives_and_neighbours. The same is applied to the 
+true_neighbour_list and true_positives_and_neighbours. This step was not necessary, instead false_positives_and_neighbours and true_positives_and_neighbours
 could have been used with small changes as input for ESM-2.
 '''
 false_neighbour_list = []
 true_neighbour_list = []
 
-for row in final_false_list:
+for row in false_positives_and_neighbours:
     false_neighbour_list.append(row[0])
     for neighbour in row[1]:
         false_neighbour_list.append(neighbour)
 
-for row in final_true_list:
+for row in true_positives_and_neighbours:
     true_neighbour_list.append(row[0])
     for neighbour in row[1]:
         true_neighbour_list.append(neighbour)
@@ -408,8 +406,8 @@ for model_name in model_names:
             model_name,
             24,
             visualize,
-            final_false_list,
-            final_true_list,
+            false_positives_and_neighbours,
+            true_positives_and_neighbours,
             false_neighbour_list,
             true_neighbour_list)
 
@@ -421,8 +419,8 @@ for model_name in model_names:
                 model_name,
                 representation_layer,
                 visualize,
-                final_false_list,
-                final_true_list,
+                false_positives_and_neighbours,
+                true_positives_and_neighbours,
                 false_neighbour_list,
                 true_neighbour_list)
 
