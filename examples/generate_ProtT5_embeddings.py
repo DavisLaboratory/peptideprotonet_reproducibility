@@ -21,7 +21,7 @@ This script is used for the following tasks:
 2. Plot precomputed ProtT5 embeddings with the function plot_stored_embeddings().
    This function expects the file 'example_data/protT5_embeddings_df.pkl' 
 3. Conduct the neighbour experiment with the function get_neighbor_distances_of_examples().
-   This function expects the files 'example_data/final_false_list.pkl' and 'example_data/final_true_list.pkl'.
+   This function expects the files 'example_data/false_positives_and_neighbours.pkl' and 'example_data/true_positives_and_neighbours.pkl'.
    
 Select at the very bottom of this script which functions you want to run.
 '''
@@ -137,9 +137,9 @@ def plot_stored_embeddings():
 
 def get_neighbor_distances_of_examples():
 
-    with open('example_data/final_false_list.pkl', 'rb') as file:
+    with open('example_data/false_positives_and_neighbours.pkl', 'rb') as file:
         final_false_list = pickle.load(file)
-    with open('example_data/final_true_list.pkl', 'rb') as file:
+    with open('example_data/true_positives_and_neighbours.pkl', 'rb') as file:
         final_true_list = pickle.load(file)
 
     false_neighbour_list = []
