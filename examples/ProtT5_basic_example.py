@@ -2,6 +2,10 @@ from transformers import T5Tokenizer, T5EncoderModel
 import torch
 import re
 
+'''
+This script is offered by the developers of ProtT5 to demonstrate its basic usage.
+'''
+
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # Load the tokenizer
