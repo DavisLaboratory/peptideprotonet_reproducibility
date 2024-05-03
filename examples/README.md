@@ -27,7 +27,7 @@
       (high anchor number were tested fewer times due to their computation time). The model esm2_t6_8M_UR50D was used 
       with the 6th representation layer. Can be used as input for 
       `figures/PIPP_with_ESM_visualization.ipynb`
-    * `examples/example_data/fdr_multi_test_esm2_t33_650M_UR50D_layer_6.csv`: FDR test results of 6 test runs
+    * (Not included anymore because of too little git file storage:) `examples/example_data/fdr_multi_test_esm2_t33_650M_UR50D_layer_6.csv`: FDR test results of 6 test runs
       (high anchor number were tested fewer times due to their computation time). The model esm2_t33_650M_UR50D was
       used with the 6th representation layer. Can be used as input for 
       `figures/PIPP_with_ESM_visualization.ipynb`
