@@ -26,10 +26,6 @@ logger = logging.getLogger(__name__)
 '''
 Files to generate:
 - example_data/esm2_t33_650M_UR50D_embeddings.npy
-- example_data/all_prototypes.npz
-- example_data/protT5_embeddings_df.pkl
-- example_data/final_false_list.pkl
-- example_data/final_true_list.pkl
 '''
 
 
@@ -142,7 +138,7 @@ class Peptideprotonet:
         use_preselected_anchors=False,
         anchors_idx=[],
         use_concatenated_embeddings=True,
-        hela_only=False
+        dataset="HeLa_Yeast_Ecoli"
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Propagate the identities/labels from the support set to the query set.
@@ -153,7 +149,8 @@ class Peptideprotonet:
             Query set with the columns: ['Charge', 'Mass', 'm/z', 'Retention time', 'Retention length', 'Ion mobility index', 'Ion mobility length', 'Number of isotopic peaks']
 
         msms
-            Support set with the columns: ['PrecursorID', 'Charge', 'Mass', 'm/z', 'Retention time', 'Retention length', 'Ion mobility index', 'Ion mobility length', 'Number of isotopic peaks']
+            Support set from which the prototypes are taken.
+            with the columns: ['PrecursorID', 'Charge', 'Mass', 'm/z', 'Retention time', 'Retention length', 'Ion mobility index', 'Ion mobility length', 'Number of isotopic peaks']
 
         k_neighbours
             Number of neighbours to consider when computing identities and confidence.
@@ -182,6 +179,24 @@ class Peptideprotonet:
         generate_visualizations
             Whether to generate visualizations.
 
+        conduct_neighbour_experiment
+            Whether to generate output files that are necessary to conduct the species separation experiment
+            with false positive and true positive examples and their neighbours.
+
+        use_preselected_anchors
+            Whether to use preselected anchors for the relative representations. If true, then they need to be
+            specified in anchors_idx
+
+        anchors_idx
+            Fixed anchor indexes for the relative representations.
+
+        use_concatenated_embeddings
+            Whether to use the concatenated MS1+ESM embedding for the prototypes. If false, then just the
+            MS1 embedding will be used for the prototypes.
+
+        dataset
+            Whether this function is calles from the "HeLa_Yeast_Ecoli" or "HeLa" notebook/dataset.
+
         Returns
         -------
             Predicted identities and confidence.
@@ -195,28 +210,17 @@ class Peptideprotonet:
         >>> identities, confidence = model.propagate(ms, msms)
         """
 
-        prototypes = self._compute_prototypes(msms,
-                                              verbose=verbose,
-                                              esm2_model=esm2_model,
-                                              use_precomputed_esm_embeddings=use_precomputed_esm_embeddings,
-                                              esm_embedding_path=esm_embedding_path,
-                                              n_representation_layer=n_representation_layer,
-                                              conduct_neighbour_experiment=conduct_neighbour_experiment,
-                                              hela_only=hela_only)
-
-        '''
-        Between prototype computation and propagation:
-        1. Get ESM-2 embedding (1280-dimensional) of all prototypes
-        2. Concatenate MS1 embedding and ESM-2 embedding of all prototypes
-        
-        In the propagation process:
-        1. Define (e.g. 20 or 100) random anchor points from the prototypes
-        2. Compute similarity of all prototypes to the anchor points as a new (20- or 100-dimensional) embedding
-           by comparing their concatenated MS1+ESM-2 embedding
-        3. Compute similarity of all MS1 data points to the anchor points as a new (20- or 100-dimensional) embedding
-           by comparing their MS1 embedding
-        4. Use the similarity embeddings as the basis for the PyNNDescent computation
-        '''
+        # returns prototypes: ['PrecursorID', 'Charge', 'MS1_Embedding', 'Proteins', 'Sequence', 'Species', 'Run_Count', 'ESM_Embedding']
+        # makes call to ESM-2 to compute the sequence embeddings of prototypes.
+        prototypes = self._compute_prototypes(
+            msms,
+            verbose=verbose,
+            esm2_model=esm2_model,
+            use_precomputed_esm_embeddings=use_precomputed_esm_embeddings,
+            esm_embedding_path=esm_embedding_path,
+            n_representation_layer=n_representation_layer,
+            conduct_neighbour_experiment=conduct_neighbour_experiment,
+            dataset=dataset)
 
         identities, confidence = self._propagate_using_prototypes(
             ms,
@@ -260,7 +264,7 @@ class Peptideprotonet:
             Query set with the columns: ['charge', 'mass', 'm/z', 'retention_time', 'retention_length', 'ion_mobility_index', 'ion_mobility_length', 'num_isotopic_peaks']
 
         prototypes
-            Prototypes with the columns: ['precursor_id', 'charge', 'embedding', 'protein', 'sequence', 'species']
+            Prototypes with the columns: ['PrecursorID', 'Charge', 'MS1_Embedding', 'Proteins', 'Sequence', 'Species', 'Run_Count', 'ESM_Embedding']
 
         k_neighbours
             Number of neighbours to consider when computing identities and confidence.
@@ -392,105 +396,76 @@ class Peptideprotonet:
                 index = np.where(prototypes['PrecursorID'] == true_positive[0])[0][0]
                 true_positive_indexes.append(index)
 
-
+        # Get MS1 embedding of query precursors
         query_embeddings = self.get_latent_representations(ms[self._features])
         query_charges = ms["Charge"].values
-
-        # prototype_embeddings = prototypes["Embedding"]
-        # prototype_charges = prototypes["Charge"]
 
         print('Computing relative representations...')
 
         if use_anchors:
             means = np.mean(query_embeddings, axis=0)
             query_embeddings -= means
-            prototypes["Embedding"] -= means
+            prototypes["MS1_Embedding"] -= means
 
             if use_concatenated_embeddings:
-                pca = PCA()
-                pca.fit(prototypes['Esm_embedding'])
 
-                principal_components_esm = scanpy.pp.pca(prototypes['Esm_embedding'], n_comps=n_principal_components)
-                prototypes['Concatenated_embedding'] = np.hstack((prototypes['Embedding'], principal_components_esm))
+                # Retrieve the first n principal components of the ESM-2 embeddings.
+                principal_components_esm = scanpy.pp.pca(prototypes['ESM_Embedding'], n_comps=n_principal_components)
+                prototypes['Concatenated_Embedding'] = np.hstack((prototypes['MS1_Embedding'], principal_components_esm))
 
                 if generate_visualizations:
 
-                    # Cumulative explained variance
-                    plt.figure(figsize=(8, 6))
+                    # Compute Principal Component Analysis of ESM-2 Embeddings for visualization.
+                    # Here, another library is used for PCA than before, simply because of convenience of the offered functions.
+                    pca = PCA()
+                    pca.fit(prototypes['ESM_Embedding'])
+
+                    # Plot Cumulative Explained Variance.
+                    plt.figure(figsize=(10, 8))
                     plt.plot(range(1, len(pca.explained_variance_ratio_) + 1), np.cumsum(pca.explained_variance_ratio_),
                              marker='o')
-                    plt.xlabel('Number of Components')
-                    plt.ylabel('Cumulative Explained Variance')
-                    plt.title('Cumulative explained variance')
+                    plt.axvline(x=25, color='black', linestyle='--')
+                    plt.xlabel('Principal Component Number', fontsize=25)
+                    plt.ylabel('Cumulative Explained Variance', fontsize=25)
+                    plt.ylim(0, 1.05)
+                    plt.title('Cumulative Explained Variance', fontsize=25)
+                    plt.xticks([30,200,400,600,800,1000,1200], fontsize=20)
+                    #plt.xscale('log')
+                    plt.yticks([0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1],fontsize=20)
                     plt.show()
 
-                    # Scree plot
-                    plt.figure(figsize=(8, 6))
-                    plt.plot(pca.explained_variance_ratio_)
-                    plt.xlabel('Number of Components')
-                    plt.ylabel('Eigenvalues')
-                    plt.title('Scree Plot')
+                    # Scree plot.
+                    plt.figure(figsize=(10, 8))
+                    plt.plot(pca.explained_variance_ratio_,
+                             marker='o')
+                    plt.xticks([30,200,400,600,800,1000,1200], fontsize=20)
+                    plt.yticks(fontsize=20)
+                    plt.axvline(x=25, color='black', linestyle='--')
+                    plt.xlabel('Principal Component Number', fontsize=25)
+                    plt.ylabel('Individual Explained Variance', fontsize=25)
+                    #plt.xscale('log')
+                    plt.title('Scree Plot', fontsize=25)
                     plt.show()
 
-                    # plot concatenated embeddings
+                    # Plot UMAP of concatenated embeddings colored by charge.
                     reducer = umap.UMAP(metric='cosine')
-                    umap_embedding = reducer.fit_transform(prototypes['Concatenated_embedding'])
-                    fig, ax = plt.subplots(figsize=(14, 14))
-                    ax.set_xlabel('UMAP1')
-                    ax.set_ylabel('UMAP2')
-                    ax.set_title('Prototype concatenated embeddings')
-                    umap1 = umap_embedding[:, 0]
-                    umap2 = umap_embedding[:, 1]
-                    ax.scatter(umap1, umap2, c='blue', s=.1, label='Prototype', alpha=.5)
-                    ax.legend(markerscale=8)
-                    plt.show()
-
-                    # plot different features on the UMAP of the concatenated embedding
+                    umap_embedding = reducer.fit_transform(prototypes['Concatenated_Embedding'])
                     fig, ax = plt.subplots(figsize=(14, 14))
                     sp = ax.scatter(umap_embedding[:, 0], umap_embedding[:, 1], c=prototypes["Charge"], s=0.1)
                     ax.set_xlabel('UMAP1')
                     ax.set_ylabel('UMAP2')
                     ax.set_title('Prototype conc. emb. | latent space - Charge')
                     fig.colorbar(sp)
-                    '''
-                    ax = axs[0][0]
-                    sp = ax.scatter(umap_embedding[:, 0], umap_embedding[:, 1], c=ms['Retention time'], s=0.1)
-                    ax.set_xlabel('UMAP1')
-                    ax.set_ylabel('UMAP2')
-                    ax.set_title('Prototype conc. emb. | latent space - RT')
-                    fig.colorbar(sp)
-        
-                    ax = axs[0][1]
-                    sp = ax.scatter(umap_embedding[:, 0], umap_embedding[:, 1], c=prototype_charges, s=0.1)
-                    ax.set_xlabel('UMAP1')
-                    ax.set_ylabel('UMAP2')
-                    ax.set_title('Prototype conc. emb. | latent space - Charge')
-                    fig.colorbar(sp)
-        
-                    ax = axs[1][0]
-                    sp = ax.scatter(umap_embedding[:, 0], umap_embedding[:, 1], c=ms['Mass'], s=0.1)
-                    ax.set_xlabel('UMAP1')
-                    ax.set_ylabel('UMAP2')
-                    ax.set_title('Prototype conc. emb. | latent space - Mass')
-                    fig.colorbar(sp)
-        
-                    ax = axs[1][1]
-                    sp = ax.scatter(umap_embedding[:, 0], umap_embedding[:, 1], c=ms['m/z'], s=0.1)
-                    ax.set_xlabel('UMAP1')
-                    ax.set_ylabel('UMAP2')
-                    ax.set_title('Prototype conc. emb. | latent space - m/z')
-                    fig.colorbar(sp)
-        
-                    ax = axs[1][2]
-                    sp = ax.scatter(umap_embedding[:, 0], umap_embedding[:, 1], c=ms['Number of isotopic peaks'],
-                                    s=0.1)
-                    ax.set_xlabel('UMAP1')
-                    ax.set_ylabel('UMAP2')
-                    ax.set_title('Prototype conc. emb. | latent space - Number of isotopic peaks')
-                    fig.colorbar(sp)
-                    '''
                     plt.show()
 
+                '''
+                1. Filters out prototypes that are not from the species 'HeLa'. 
+                   Should be generalized on the species from the query data set in the future.
+                2. Either:
+                    a. Selects a random subset of the filtered prototypes as anchors.
+                    b. Selects the prototypes of which the indexes were already specified in 'anchors_idx'.
+                3. Returns anchor prototypes.
+                '''
                 anchors = self._select_anchors(
                     prototypes,
                     n_anchors=n_anchors,
@@ -498,25 +473,15 @@ class Peptideprotonet:
                     preselected_anchors_idx=anchors_idx,
                     use_concatenated_embeddings=use_concatenated_embeddings)
 
+                # Compute Relative Representations of Prototypes based on Concatenated MS1-ESM Embeddings
                 prototype_representation = self._compute_relative_representations(
-                    prototypes['Concatenated_embedding'], anchors['Concatenated_embedding']
+                    prototypes['Concatenated_Embedding'], anchors['Concatenated_Embedding']
                 )
 
-                use_precomputed_ms1_rel = False
-                if use_precomputed_ms1_rel:
-                    query_representation = np.load('example_data/rel_repr_ms1_H.npy')
-                else:
-                    query_representation = self._compute_relative_representations(
-                        query_embeddings, anchors['MS1_embedding']
-                    )
-
-                '''
-                # store relative representations
-                store_rel_rep = False
-                if store_rel_rep:
-                    np.save('example_data/rel_repr_prototypes_300an_2pc_H.npy', prototype_representation)
-                    np.save('example_data/rel_repr_ms1_300an_2pc_H.npy', query_representation)
-                '''
+                # Compute Relative Representations of Query Precursors based on MS1 Embeddings
+                query_representation = self._compute_relative_representations(
+                    query_embeddings, anchors['MS1_Embedding']
+                )
 
             else:
                 anchors = self._select_anchors(
@@ -526,11 +491,14 @@ class Peptideprotonet:
                     preselected_anchors_idx=anchors_idx,
                     use_concatenated_embeddings=use_concatenated_embeddings)
 
+                # Compute Relative Representations of Prototypes based on MS1 Embeddings
                 prototype_representation = self._compute_relative_representations(
-                    prototypes['Embedding'], anchors['MS1_embedding']
+                    prototypes['MS1_Embedding'], anchors['MS1_Embedding']
                 )
+
+                # Compute Relative Representations of Query Precursors based on MS1 Embeddings
                 query_representation = self._compute_relative_representations(
-                    query_embeddings, anchors['MS1_embedding']
+                    query_embeddings, anchors['MS1_Embedding']
                 )
 
             if generate_visualizations:
@@ -568,7 +536,7 @@ class Peptideprotonet:
                 ax.legend(markerscale=8)
                 plt.show()
 
-                # plot different features on the UMAP of the MS1 relative representation
+                # Plot different features on the UMAP of the MS1 relative representation.
                 fig, axs = plt.subplots(figsize=(14, 12), ncols=3, nrows=2)
 
                 ax = axs[0][0]
@@ -610,10 +578,11 @@ class Peptideprotonet:
 
             # recover original embeddings - keep in-place to save memory
             query_embeddings += means
-            prototypes['Embedding'] += means
+            prototypes['MS1_Embedding'] += means
 
         else:
-            prototype_representation = prototypes['Embedding']
+            # Without Relative Representations: MS1 Embedding is the representation. ESM-2 embeddings are not used here.
+            prototype_representation = prototypes['MS1_Embedding']
             query_representation = query_embeddings
 
         print("setting up nearest neighbour graph...")
@@ -636,7 +605,8 @@ class Peptideprotonet:
             true_neighbour_ids = prototypes['PrecursorID'][true_neighbours]
 
             # Get ESM-2 embeddings of example prototypes and their neighbours.
-            self._esm_call_examples("esm2_t33_650M_UR50D", false_positives, true_positives, false_neighbour_ids, true_neighbour_ids)
+            self._store_false_true_positives_and_neighbours("esm2_t33_650M_UR50D", false_positives, true_positives,
+                                                            false_neighbour_ids, true_neighbour_ids)
 
         neighbours, distances = knn_index.query(query_representation, k=k_neighbours)
 
@@ -687,21 +657,17 @@ class Peptideprotonet:
         """
 
         '''
-        TODO: 
-         - Use seed/indexes to have the same randomly selected anchors every time with same seed
-         - Use only anchors from the query data set (HeLa)
-         - Select anchors only from peptides that were present in 9/10 or 10/10 runs
+        TODO: Select anchors only from peptides that were present in 9/10 or 10/10 runs. Does not work yet.
         '''
-
         preselect_anchors = False
         if preselect_anchors:
             # filter out peptides that were in too few runs
-            filtered_latent_embeddings = prototypes['Embedding'][
-                ((prototypes['Run Count'] > 5) & ((prototypes['Species'] == 'Ecoli') | (prototypes['Species'] == 'Yeast'))) |
-                ((prototypes['Run Count'] > 15) & (prototypes['Species'] == 'HeLa'))]
-            filtered_concatenated_embeddings = prototypes['Concatenated_embedding'][
-                ((prototypes['Run Count'] > 5) & ((prototypes['Species'] == 'Ecoli') | (prototypes['Species'] == 'Yeast'))) |
-                ((prototypes['Run Count'] > 15) & (prototypes['Species'] == 'HeLa'))]
+            filtered_latent_embeddings = prototypes['MS1_Embedding'][
+                ((prototypes['Run_Count'] > 5) & ((prototypes['Species'] == 'Ecoli') | (prototypes['Species'] == 'Yeast'))) |
+                ((prototypes['Run_Count'] > 15) & (prototypes['Species'] == 'HeLa'))]
+            filtered_concatenated_embeddings = prototypes['Concatenated_Embedding'][
+                ((prototypes['Run_Count'] > 5) & ((prototypes['Species'] == 'Ecoli') | (prototypes['Species'] == 'Yeast'))) |
+                ((prototypes['Run_Count'] > 15) & (prototypes['Species'] == 'HeLa'))]
 
             anchors_idx = np.random.choice(
                 filtered_latent_embeddings.shape[0], size=n_anchors, replace=False
@@ -715,25 +681,31 @@ class Peptideprotonet:
             filtered_prototypes = {key: value[right_species_indices] for key, value in prototypes.items()}
 
             if use_preselected_anchors:
-                print("Anchor indexes:", preselected_anchors_idx)
+
+                # Take anchors from preselected_anchors_idx.
                 if use_concatenated_embeddings:
-                    anchors = {'MS1_embedding': filtered_prototypes['Embedding'][preselected_anchors_idx],
-                               'Concatenated_embedding': filtered_prototypes['Concatenated_embedding'][preselected_anchors_idx]}
+                    # Store coupled (MS1, MS1+ESM) anchors.
+                    anchors = {'MS1_Embedding': filtered_prototypes['MS1_Embedding'][preselected_anchors_idx],
+                               'Concatenated_Embedding': filtered_prototypes['Concatenated_Embedding'][preselected_anchors_idx]}
                 else:
-                    anchors = {'MS1_embedding': filtered_prototypes['Embedding'][preselected_anchors_idx]}
+                    # Store simple (MS1) anchors. Here, the ESM-embedding is not used.
+                    anchors = {'MS1_Embedding': filtered_prototypes['MS1_Embedding'][preselected_anchors_idx]}
             else:
+
+                # Select a set of random anchor points.
                 random_state = np.random.RandomState()
                 anchors_idx = random_state.choice(
-                    filtered_prototypes['Embedding'].shape[0], size=n_anchors, replace=False
+                    filtered_prototypes['MS1_Embedding'].shape[0], size=n_anchors, replace=False
                 )
-                print("Anchor indexes:", anchors_idx)
-                if use_concatenated_embeddings:
-                    anchors = {'MS1_embedding': filtered_prototypes['Embedding'][anchors_idx],
-                               'Concatenated_embedding': filtered_prototypes['Concatenated_embedding'][anchors_idx]}
-                else:
-                    anchors = {'MS1_embedding': filtered_prototypes['Embedding'][preselected_anchors_idx]}
 
-        # why do we use a copy?
+                if use_concatenated_embeddings:
+                    # Store coupled (MS1, MS1+ESM) anchors
+                    anchors = {'MS1_Embedding': filtered_prototypes['MS1_Embedding'][anchors_idx],
+                               'Concatenated_Embedding': filtered_prototypes['Concatenated_Embedding'][anchors_idx]}
+                else:
+                    # Store simple (MS1) anchors. Here, the ESM-embedding is not used.
+                    anchors = {'MS1_Embedding': filtered_prototypes['MS1_Embedding'][preselected_anchors_idx]}
+
         return anchors.copy()
 
     def _compute_relative_representations(
@@ -772,10 +744,10 @@ class Peptideprotonet:
         verbose=False,
         use_precomputed_esm_embeddings=False,
         esm2_model="esm2_t33_650M_UR50D",
-        esm_embedding_path='example_data/esm2_t33_650M_UR50D_embeddings_6.npy',
+        esm_embedding_path='example_data/embeddings_esm2_t6_8M_UR50D_layer6_datasetHeLa_Yeast_Ecoli.npy',
         n_representation_layer=6,
         conduct_neighbour_experiment=False,
-        hela_only=False
+        dataset="HeLa_Yeast_Ecoli"
     ) -> Dict[str, np.ndarray]:
         """
         Helper function to compute prototypes.
@@ -799,15 +771,17 @@ class Peptideprotonet:
 
         Returns
         -------
-            Prototypes with the columns: ['PrecursorID', 'Charge', 'Embedding', 'Proteins', 'Sequence', 'Species', 'Run Count]
+            Prototypes with the columns: ['PrecursorID', 'Charge', 'MS1_Embedding', 'Proteins', 'Sequence', 'Species', 'Run_Count', 'ESM_Embedding']
         """
 
         if verbose:
             print("computing prototypes...")
 
+        # Gets MS1 embedding of prototypes
         support_embeddings = self.get_latent_representations(msms[self._features])
 
-        prototypes = []  # list of (precursor_id, charge, embedding)
+        # list of (precursor_id, charge, ms1_embedding, proteins, sequence, species, run_count, esm_embedding)
+        prototypes = []
         precursor_groups = msms.groupby(["PrecursorID"])
 
         for group in precursor_groups:
@@ -821,17 +795,16 @@ class Peptideprotonet:
                 species = group[1]['Species'].iloc[0]
             else: # only applicable for the HeLa example notebook
                 species = 'HeLa'
-            # rework run_count: count only hela
             run_count = len(group[1])
             prototypes.append(
                 (precursor_id, charge, np.mean(support_embeddings[ilocs], axis=0), proteins, sequence, species, run_count)
             )
 
-        precursor_ids, charges, embeddings, proteins, sequences, species, run_count = zip(*prototypes)
+        precursor_ids, charges, ms1_embeddings, proteins, sequences, species, run_count = zip(*prototypes)
 
         precursor_ids = np.array(precursor_ids)
         charges = np.array(charges)
-        embeddings = np.array(embeddings)
+        ms1_embeddings = np.array(ms1_embeddings)
         proteins = np.array(proteins)
         sequences = np.array(sequences)
         species = np.array(species)
@@ -840,11 +813,11 @@ class Peptideprotonet:
         prototypes = {
             "PrecursorID": precursor_ids,
             "Charge": charges,
-            "Embedding": embeddings,
+            "MS1_Embedding": ms1_embeddings,
             "Protein": proteins,
             "Sequence": sequences,
             "Species": species,
-            "Run Count": run_count
+            "Run_Count": run_count
         }
 
         '''
@@ -854,21 +827,27 @@ class Peptideprotonet:
         if use_precomputed_esm_embeddings:
             esm_embeddings_np = np.load(esm_embedding_path)
         else:
-            '''
-            Prepare ESM:
-            The next lines could be included in the function get_esm_embedding for clarity
-            '''
+
+            # sets up model and alphabet of specified esm2_model.
             model, alphabet = esm.pretrained.load_model_and_alphabet(esm2_model)
+
+            # is necessary for ESM to process batches of input sequences.
             batch_converter = alphabet.get_batch_converter()
-            model.eval()  # disables dropout for deterministic results
-            # work with numpy arrays instead of lists?
+
+            # disables dropout for deterministic results.
+            model.eval()
+
+            # prepare input for ESM as list of tuples (PrecursorID, Sequence).
             esm_input = list(zip(prototypes['PrecursorID'], prototypes['Sequence']))
 
+            # compute ESM embeddings
             esm_embeddings = self._get_esm_embedding(batch_converter, model, alphabet, esm_input, n_representation_layer)
-            esm_embeddings_np = np.array(esm_embeddings)
-            np.save('example_data/{}_embeddings_6'.format(esm2_model), esm_embeddings_np)
 
-        prototypes['Esm_embedding'] = esm_embeddings_np
+            # store ESM embeddings as a numpy array.
+            esm_embeddings_np = np.array(esm_embeddings)
+            np.save(f'example_data/embeddings_{esm2_model}_layer{n_representation_layer}_dataset{dataset}', esm_embeddings_np)
+
+        prototypes['ESM_Embedding'] = esm_embeddings_np
 
         if conduct_neighbour_experiment:
             # save prototypes to file
@@ -958,15 +937,13 @@ class Peptideprotonet:
 
     '''
     Function that was used to store false/true transfer example prototypes and their neighbors.
-    The actual false/true transfer experiments are now conducted in the following two scripts:
-    - examples/ESM2_neighbor_transfer_example.py
-    - examples/protT5_neighbor_transfer_example_and_embeddings.py
+    The actual species separation experiment is conducted in species_separation_experiment.py
     '''
-    def _esm_call_examples(self, model_location, false_positives, true_positives, false_transfer_prototypes, true_transfer_prototypes):
+    def _store_false_true_positives_and_neighbours(self, model_location, false_positives, true_positives, false_transfer_prototypes, true_transfer_prototypes):
 
         # Create list of tuples with example prototype sequence and list of (filtered) neighbour sequences
-        # Todo: could be simplified by just passing arguments with both PrecursorID and Sequence
-        final_false_list = []
+        # could be simplified by just passing arguments with both PrecursorID and Sequence
+        false_positives_and_neighbours = []
         for index, neighbour_list in enumerate(false_transfer_prototypes):
             neighbour_final_list = []
             for neighbour_precursorID in neighbour_list:
@@ -979,9 +956,9 @@ class Peptideprotonet:
                     sequence_compatible = False
                 if sequence_compatible:
                     neighbour_final_list.append((neighbour_precursorID, neighbour_sequence))
-            final_false_list.append((false_positives[index], neighbour_final_list))
+            false_positives_and_neighbours.append((false_positives[index], neighbour_final_list))
 
-        final_true_list = []
+        true_positives_and_neighbours = []
         for index, neighbour_list in enumerate(true_transfer_prototypes):
             neighbour_final_list = []
             for neighbour_precursorID in neighbour_list:
@@ -994,27 +971,24 @@ class Peptideprotonet:
                     sequence_compatible = False
                 if sequence_compatible:
                     neighbour_final_list.append((neighbour_precursorID, neighbour_sequence))
-            final_true_list.append((true_positives[index], neighbour_final_list))
+            true_positives_and_neighbours.append((true_positives[index], neighbour_final_list))
 
-        # Save lists to proceed with saved data in another run
-        with open('example_data/false_transfer_prototypes_list.pkl', 'wb') as file:
-            pickle.dump(false_transfer_prototypes, file)
-        with open('example_data/true_transfer_prototypes_list.pkl', 'wb') as file:
-            pickle.dump(true_transfer_prototypes, file)
-        with open('example_data/final_false_list_36.pkl', 'wb') as file:
-            pickle.dump(final_false_list, file)
-        with open('example_data/final_true_list_36.pkl', 'wb') as file:
-            pickle.dump(final_true_list, file)
+        # Save lists to proceed with saved data in species_separation_experiment.py
+        with open('example_data/false_positives_and_neighbours.pkl', 'wb') as file:
+            pickle.dump(false_positives_and_neighbours, file)
+        with open('example_data/true_positives_and_neighbours.pkl', 'wb') as file:
+            pickle.dump(true_positives_and_neighbours, file)
 
-        # Process is continued in the script transfer_example_neighbors.py
+        # Process is continued in the script species_separation_experiment.py
 
 
-    def _get_esm_embedding(self,
-                           batch_converter,
-                           model,
-                           alphabet,
-                           data,
-                           n_representation_layer):
+    def _get_esm_embedding(
+            self,
+            batch_converter,
+            model,
+            alphabet,
+            data,
+            n_representation_layer):
         """
         Main function to retrieve ESM-2 embeddings after setting up a model, alphabet and batch_converter.
 
@@ -1028,7 +1002,7 @@ class Peptideprotonet:
             ESM-2 model.
 
         alphabet
-            ESM-2 alphabet.
+            ESM-2 model-specific alphabet.
 
         data
             List of tuples in the form ('PrecursorID',  'Sequence').
@@ -1040,30 +1014,28 @@ class Peptideprotonet:
         -------
             List of representations.
 
-        Example
-        -------
-
         """
 
         sequence_representations = []
 
         # Iterate through the list in bulks because the execution is more stable that way.
+        # bulk_size of 500 is not necessarily the best size.
         bulk_size = 500
         for i in range(0, len(data), bulk_size):
-            print("i:", i)
+            print("ESM-2 embeddings of peptide sequences already computed:", i)
             bulk = data[i:i + bulk_size]
 
-            # Use batch converter as done in ESM-2 example.
+            # Use batch converter as recommended by ESM-2 documentation.
             batch_labels, batch_strs, batch_tokens = batch_converter(bulk)
             batch_lens = (batch_tokens != alphabet.padding_idx).sum(1)
 
-            # Extract per-residue representations (on CPU) as done in ESM-2 example.
-            # TODO: match layer number to chosen model
+            # Extract per-residue representations (on CPU) as recommended by ESM-2 documentation.
+            # n_representation_layer specifies the ESM-2 layer from which to take the representation.
             with torch.no_grad():
                 results = model(batch_tokens, repr_layers=[n_representation_layer], return_contacts=True)
             token_representations = results["representations"][n_representation_layer]
 
-            # Generate per-sequence representations via averaging as done in ESM-2 example.
+            # Generate per-sequence representations via averaging as recommended by ESM-2 documentation.
             # NOTE: token 0 is always a beginning-of-sequence token, so the first residue is token 1.
             for i, tokens_len in enumerate(batch_lens):
                 sequence_representations.append(token_representations[i, 1: tokens_len - 1].mean(0))
