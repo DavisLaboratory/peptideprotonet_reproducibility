@@ -23,11 +23,6 @@ from ._module import Encoder
 
 logger = logging.getLogger(__name__)
 
-'''
-Files to generate:
-- example_data/esm2_t33_650M_UR50D_embeddings.npy
-'''
-
 
 class Peptideprotonet:
     def __init__(self, device: str = None, dir_path: str = None):
@@ -129,7 +124,7 @@ class Peptideprotonet:
         verbose=True,
         esm2_model="esm2_t33_650M_UR50D",
         use_precomputed_esm_embeddings=False,
-        esm_embedding_path='example_data/esm2_t33_650M_UR50D_embeddings_6.npy',
+        esm_embedding_path='example_data/embeddings_esm2_t6_8M_UR50D_layer6_datasetHeLa_Yeast_Ecoli.npy',
         n_anchors=300,
         n_principal_components=10,
         n_representation_layer=6,
@@ -657,10 +652,11 @@ class Peptideprotonet:
         """
 
         '''
-        TODO: Select anchors only from peptides that were present in 9/10 or 10/10 runs. Does not work yet.
+        Possible Todo: Select anchors only from peptides that were present in 9/10 or 10/10 runs.
+        The way it was done with the option preselect_most_present_anchors did not improve results.
         '''
-        preselect_anchors = False
-        if preselect_anchors:
+        preselect_most_present_anchors = False
+        if preselect_most_present_anchors:
             # filter out peptides that were in too few runs
             filtered_latent_embeddings = prototypes['MS1_Embedding'][
                 ((prototypes['Run_Count'] > 5) & ((prototypes['Species'] == 'Ecoli') | (prototypes['Species'] == 'Yeast'))) |
@@ -704,7 +700,7 @@ class Peptideprotonet:
                                'Concatenated_Embedding': filtered_prototypes['Concatenated_Embedding'][anchors_idx]}
                 else:
                     # Store simple (MS1) anchors. Here, the ESM-embedding is not used.
-                    anchors = {'MS1_Embedding': filtered_prototypes['MS1_Embedding'][preselected_anchors_idx]}
+                    anchors = {'MS1_Embedding': filtered_prototypes['MS1_Embedding'][anchors_idx]}
 
         return anchors.copy()
 
@@ -942,7 +938,7 @@ class Peptideprotonet:
     def _store_false_true_positives_and_neighbours(self, model_location, false_positives, true_positives, false_transfer_prototypes, true_transfer_prototypes):
 
         # Create list of tuples with example prototype sequence and list of (filtered) neighbour sequences
-        # could be simplified by just passing arguments with both PrecursorID and Sequence
+        # Todo: could be simplified by just passing arguments with both PrecursorID and Sequence
         false_positives_and_neighbours = []
         for index, neighbour_list in enumerate(false_transfer_prototypes):
             neighbour_final_list = []
