@@ -21,7 +21,8 @@ setup(
         'protobuf>=4.25.2',          # for protT5
         'scipy>=1.11.4',
         'scanpy>=1.9.8',
-        'plotly>=5.20.0'
+        'plotly>=5.20.0',
+        'nbformat>=4.2.0',
     ]
 
 )
